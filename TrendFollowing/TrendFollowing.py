@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Trend following investemnt stragegy tool kit
+Trend following investemnt strategy tool kit
 
 @author: arnulf.q@gmail.com
 """
@@ -28,6 +28,7 @@ yh_tkrlst = ['ZN=F']
 
 # Data pull from yahoo finance
 path = r'C:\Users\arnoi\Documents\Python Scripts\db\futures_10Y_yf.parquet'
+path = r'H:\db\futures_ZN_yf.parquet'
 if os.path.isfile(path):
     # From saved db
     data = pd.read_parquet(path)
@@ -65,7 +66,7 @@ dt_cutoff = data_ret[tstmp_first_available_dt:].\
 dt_cutoff['End'] = dt_cutoff['Start'] + dt.timedelta(days=90)
 
 # 3M Returns
-df_3M_Excess_Returns = pd.\
+df_3M_Returns = pd.\
     DataFrame(columns=['Start','End','T3M_Ret', 'Ret', 'ERet'],
               index=dt_cutoff.index)
 for i,r in dt_cutoff.iterrows():
@@ -75,8 +76,8 @@ for i,r in dt_cutoff.iterrows():
     curr_ret = logCurrP - logP2
     lookback_exc_ret = curr_ret - lookback_ret
     tmp_arr = np.concatenate([lookback_ret, curr_ret, lookback_exc_ret])
-    df_3M_Excess_Returns.loc[i,['Start', 'End']] = r[['Start','End']]
-    df_3M_Excess_Returns.loc[i,['T3M_Ret', 'Ret', 'ERet']] = tmp_arr
+    df_3M_Returns.loc[i,['Start', 'End']] = r[['Start','End']]
+    df_3M_Returns.loc[i,['T3M_Ret', 'Ret', 'ERet']] = tmp_arr
     
 
 
