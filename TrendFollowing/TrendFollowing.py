@@ -49,6 +49,10 @@ if isDataOOD:
     str_idt = last_date_data.strftime("%Y-%m-%d")
     str_fdt = todays_date.strftime("%Y-%m-%d")
     new_data = pdr.get_data_yahoo(yh_tkrlst, start=str_idt, end=str_fdt)
+    if new_data.index[-1] != todays_date:
+        str_fdt = (todays_date + pd.tseries.offsets.DateOffset(days=1)).\
+            strftime("%Y-%m-%d")
+        new_data = pdr.get_data_yahoo(yh_tkrlst, start=str_idt, end=str_fdt)
     updated_data = pd.concat([data,new_data]).\
         reset_index().drop_duplicates('Date').set_index('Date')
     print("Saving data...")
@@ -58,7 +62,7 @@ if isDataOOD:
 #%% ZN Price Viz
 ## Plotting T3Y Price
 fig, ax = plt.subplots()
-ax.plot(data.loc['2023':,'Adj Close'], '-', color='darkcyan')
+ax.plot(data.loc['2024':,'Adj Close'], '-', color='darkcyan')
 myFmt = mdates.DateFormatter('%b%y')
 ax.xaxis.set_major_formatter(myFmt)
 ax.set_xlabel('')
@@ -76,17 +80,39 @@ data_ret = data_logP.diff().fillna(0)
 ema_alpha = 1-60/61
 data_ret['EMA'] = data_ret.ewm(span=121, adjust=False).mean()
 
-# Daily ex ante volatility
-def exante_var_estimate(t=2, alpha=1-60/61):
-    if t<=0:
-        t=1
-    sumvar = 0
-    var_rt = data_ret['EMA'].iloc[t]
-    for n in range(t-1):
-        rt_1_i = data_ret['Adj Close'].iloc[t-1-n]
-        sumvar += (1-alpha)*alpha**n*(rt_1_i - var_rt)**2
-    return 261*sumvar
+# Cum return index
+data_idx = data_ret.cumsum().apply(np.exp)
+t1y_date = todays_date - pd.tseries.offsets.DateOffset(years=1)
+data_idx.loc[t1y_date:].plot(color=['darkcyan','orange'])
 
+# Function to compute daily ex ante variance estimate
+def exante_var_estimate(t: pd.Timestamp = pd.Timestamp("2024-02-07"), 
+                        alpha: float = 1-60/61) -> float:
+    """
+    Parameters
+    ----------
+    t : pd.Timestamp
+        Estimate date. The default is pd.Timestamp("2024-02-07").
+    alpha : float, optional
+        EMA parameter. The default is 1-60/61.
+
+    Returns
+    -------
+    float
+        Exponentially weighted average of squared returns.
+    """
+    # Index for t as date
+    idx_t = np.where(data_ret.index == t)[0][0]
+    if idx_t<=0:
+        idx_t = 1
+    # Exp. weighted average return
+    var_rt = data_ret['EMA'].iloc[idx_t]
+    # EWASR
+    sumvar = 0
+    for n in range(idx_t-1):
+        rt_1_i = data_ret['Adj Close'].iloc[idx_t-1-n]
+        sumvar += (1-alpha)*(alpha**n)*(rt_1_i - var_rt)**2
+    return 261*sumvar
 #
 #lst_eave = []
 #for t in range(data_ret.shape[0]):
@@ -94,48 +120,62 @@ def exante_var_estimate(t=2, alpha=1-60/61):
 #data_ret['eaSigma'] = np.sqrt(lst_eave)
 
 # Current ex ante volatility estimate
-volat_estimate = np.sqrt(exante_var_estimate(t=data_ret.shape[0]-1))
+volat_estimate = np.sqrt(exante_var_estimate(t=todays_date))
 
 # Position size - constant vol
-pos_size = 0.40/volat_estimate
+pos_size = np.floor(0.40/volat_estimate)
 
-# Last 12 months smoothed return
+# Last k months smoothed return
+kmonths = [12,9,6,3,1]
+idxdt = todays_date - pd.tseries.offsets.DateOffset(days=1)
 df_idx_dates = pd.DataFrame(
-    [todays_date - pd.tseries.offsets.DateOffset(months=n) for n in [12,9,6,3]],
+    [idxdt - pd.tseries.offsets.DateOffset(months=n) for n in kmonths],
     columns=['Idx_Date'],
-    index=[f"T{n}M" for n in [12,9,6,3]])
-df_kM_ret = df_idx_dates.apply(lambda d: np.exp(data_ret['EMA'].loc[d[0]:].sum())-1, axis=1)
+    index=[f"T{n}M" for n in kmonths])
 
-# Cum return index
-data_idx = data_ret.cumsum().apply(np.exp)
-t1y_date = todays_date - pd.tseries.offsets.DateOffset(years=1)
-data_idx.loc[t1y_date:].plot(color=['darkcyan','orange'])
+df_kM_ret = df_idx_dates.\
+    apply(lambda d: np.exp(data_ret['EMA'].loc[d[0]:idxdt].sum())-1, axis=1)
 
-# Dates cutoff
-tstmp_first_available_dt = data_ret.index[0] + dt.timedelta(days = 91)
-tstmp_last_available_dt = data_ret.index[-1] - dt.timedelta(days = 91)
-dt_cutoff = data_ret[tstmp_first_available_dt:].\
-    apply(lambda x: x.index - dt.timedelta(days=91)).\
-        rename(columns={'Adj Close':'Start'})
-dt_cutoff['End'] = dt_cutoff['Start'] + dt.timedelta(days=90)
+# Last k-month returns for each previous dates
+data_ret_sgnl = pd.DataFrame(index=data_ret.index)
+for i,r in data_ret.iterrows():
+    # End date
+    j = i - pd.tseries.offsets.DateOffset(days=1)
+    # Starting dates
+    curr_idx_dates = pd.DataFrame(
+        [j - pd.tseries.offsets.DateOffset(months=n) for n in kmonths],
+        columns=['Idx_Date'],
+        index=[f"T{n}M" for n in kmonths])
+    # k-month smoother returns
+    curr_kM_ret = curr_idx_dates.\
+        apply(lambda d: np.exp(data_ret['EMA'].loc[d[0]:j].sum())-1, axis=1)
+    # Fill df
+    data_ret_sgnl.loc[i,curr_kM_ret.index.tolist()] = curr_kM_ret.values
 
-# 3M Returns
-df_3M_Returns = pd.\
-    DataFrame(columns=['Start','End','T3M_Ret', 'Ret', 'ERet'],
-              index=dt_cutoff.index)
-for i,r in dt_cutoff.iterrows():
-    logP1, logP2 = data_logP.loc[r['Start']:r['End']].iloc[[0,-1]].to_numpy()
-    logCurrP = data_logP.loc[i].to_numpy()
-    lookback_ret = logP2 - logP1
-    curr_ret = logCurrP - logP2
-    lookback_exc_ret = curr_ret - lookback_ret
-    tmp_arr = np.concatenate([lookback_ret, curr_ret, lookback_exc_ret])
-    df_3M_Returns.loc[i,['Start', 'End']] = r[['Start','End']]
-    df_3M_Returns.loc[i,['T3M_Ret', 'Ret', 'ERet']] = tmp_arr
-    
+# Coherent signals
+df_TkM_sgnls = data_ret_sgnl[data_ret_sgnl.index[0] + \
+                    pd.tseries.offsets.DateOffset(months=np.max(kmonths)+1):]
 
+# Rebalancing dates
+idx_reb_date = 3 # Thursday
+df_TkM_sgnls['isRebDate'] = [d.weekday() for d in df_TkM_sgnls.index]
+df_TkM_sgnls['isRebDate'] = df_TkM_sgnls['isRebDate'] == idx_reb_date
+df_reb_dates = df_TkM_sgnls[df_TkM_sgnls['isRebDate']].reset_index()['Date']
 
-
+# Example
+ct_pt_value = 32*31.25
+reb_date = pd.Timestamp("2024-02-01")
+sgnl_date = reb_date - pd.tseries.offsets.BDay(1)
+str_strat_name = 'T1M'
+reb_sgnl = np.sign(df_TkM_sgnls.loc[sgnl_date, str_strat_name])
+reb_sigma = np.sqrt(exante_var_estimate(t=sgnl_date))
+reb_size = np.floor(0.40/volat_estimate)
+reb_pos_size = reb_size*reb_sgnl
+reb_px_enter = data.loc[reb_date, 'Adj Close']
+reb_date_end = reb_date + pd.tseries.offsets.DateOffset(days=6)
+reb_px_exit = data.loc[reb_date_end, 'Adj Close']
+reb_pnl = (reb_px_exit - reb_px_enter)*ct_pt_value*reb_pos_size
+reb_ret = np.log(reb_px_exit) - np.log(reb_px_enter)
 
 
 
