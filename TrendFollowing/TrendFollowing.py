@@ -16,7 +16,7 @@ import datetime as dt
 import yfinance as yf
 from pandas_datareader import data as pdr
 yf.pdr_override()
-
+import holidays
 #%% Futures Data
 # for demo purposes we are using ZN (10Y T-Note) futures contract
 
@@ -164,9 +164,9 @@ df_reb_dates = df_TkM_sgnls[df_TkM_sgnls['isRebDate']].reset_index()['Date']
 
 # Example
 ct_pt_value = 32*31.25
+str_strat_name = 'T1M'
 reb_date = pd.Timestamp("2024-02-01")
 sgnl_date = reb_date - pd.tseries.offsets.BDay(1)
-str_strat_name = 'T1M'
 reb_sgnl = np.sign(df_TkM_sgnls.loc[sgnl_date, str_strat_name])
 reb_sigma = np.sqrt(exante_var_estimate(t=sgnl_date))
 reb_size = np.floor(0.40/volat_estimate)
@@ -177,8 +177,31 @@ reb_px_exit = data.loc[reb_date_end, 'Adj Close']
 reb_pnl = (reb_px_exit - reb_px_enter)*ct_pt_value*reb_pos_size
 reb_ret = np.log(reb_px_exit) - np.log(reb_px_enter)
 
-
-
+#%%
+# Strategy backtest
+ct_pt_value = 32*31.25
+str_strat_name = 'T1M'
+tmpcal = holidays.country_holidays('US')
+lst_holidays = [date.date() for date in pd.date_range('1999-01-01', '2034-01-01') if date in tmpcal]
+bdc = np.busdaycalendar(holidays=lst_holidays)
+df_strat = pd.DataFrame()
+for i,r in df_reb_dates.items():
+    try:
+        # r is rebalance date
+        sgnl_date = r - pd.tseries.offsets.CustomBusinessDay(1, calendar=bdc)
+        reb_sgnl = np.sign(df_TkM_sgnls.loc[sgnl_date, str_strat_name])
+        reb_sigma = np.sqrt(exante_var_estimate(t=sgnl_date))
+        reb_size = np.floor(0.40/reb_sigma)
+        reb_pos_size = reb_size*reb_sgnl
+        reb_px_enter = data.loc[r, 'Adj Close']
+        reb_date_end = r + pd.tseries.offsets.CustomBusinessDay(4, calendar=bdc)
+        reb_px_exit = data.loc[reb_date_end, 'Adj Close']
+        reb_pnl = (reb_px_exit - reb_px_enter)*ct_pt_value*reb_pos_size
+        reb_ret = (np.log(reb_px_exit) - np.log(reb_px_enter))*reb_sgnl
+        df_strat.loc[r,['Signal','Pos_Size','Px_Enter', 'Px_Exit','PnL','R']] = \
+            [reb_sgnl,reb_pos_size,reb_px_enter,reb_px_exit,reb_pnl,reb_ret]
+    except:
+        continue
 
 
 
