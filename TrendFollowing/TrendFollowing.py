@@ -1,6 +1,5 @@
-# -*- coding: utf-8 -*-
 """
-Trend following investemnt strategy tool kit
+Trend following investemnt strategy tool kit.
 
 @author: arnulf.q@gmail.com
 """
@@ -17,6 +16,7 @@ import yfinance as yf
 from pandas_datareader import data as pdr
 yf.pdr_override()
 import holidays
+import calendar
 #%% Futures Data
 # for demo purposes we are using ZN (10Y T-Note) futures contract
 
@@ -125,6 +125,7 @@ volat_estimate = np.sqrt(exante_var_estimate(t=todays_date))
 # Position size - constant vol
 pos_size = np.floor(0.40/volat_estimate)
 
+#%% RETURNS
 # Last k months smoothed return
 kmonths = [12,9,6,3,1]
 idxdt = todays_date - pd.tseries.offsets.DateOffset(days=1)
@@ -152,35 +153,69 @@ for i,r in data_ret.iterrows():
     # Fill df
     data_ret_sgnl.loc[i,curr_kM_ret.index.tolist()] = curr_kM_ret.values
 
-# Coherent signals
+#%% TREND
+# Annualized k-month returns
 df_TkM_sgnls = data_ret_sgnl[data_ret_sgnl.index[0] + \
                     pd.tseries.offsets.DateOffset(months=np.max(kmonths)+1):]
+df_TkM_sgnls = df_TkM_sgnls.apply(lambda x: x*np.array([1,12/9,12/6,12/3,12]), axis=1)
 
-# Rebalancing dates
+# Trend rules
+idx_down = df_TkM_sgnls.apply(lambda x: x['T12M']>x['T9M'] and x['T9M']>x['T6M'],axis=1)
+idx_up = df_TkM_sgnls.apply(lambda x: x['T12M']<x['T9M'] and x['T9M']<x['T6M'],axis=1)
+df_TkM_sgnls['Trend'] = 0
+df_TkM_sgnls.loc[idx_down,'Trend'] = -1
+df_TkM_sgnls.loc[idx_up,'Trend'] = 1
+
+# Rebalancing months
+tmp = set([(d.year,d.month) for d in df_TkM_sgnls.index])
+first_thursday = []
+for y,m in tmp:
+    weekly_thursday=[]
+    for week in calendar.monthcalendar(y, m):
+        if week[3] != 0:
+            weekly_thursday.append(week[3])
+    first_thursday.append(
+        pd.Timestamp(dt.date(y,m,weekly_thursday[0]).strftime("%Y-%m-%d")))
+df_reb_dates = pd.DataFrame(first_thursday, columns=['RebDate']).\
+    sort_values(by='RebDate').reset_index(drop=True)['RebDate']
+
+# Rebalancing dates weekly
 idx_reb_date = 3 # Thursday
 df_TkM_sgnls['isRebDate'] = [d.weekday() for d in df_TkM_sgnls.index]
 df_TkM_sgnls['isRebDate'] = df_TkM_sgnls['isRebDate'] == idx_reb_date
 df_reb_dates = df_TkM_sgnls[df_TkM_sgnls['isRebDate']].reset_index()['Date']
 
-# Example
+# Example: investment signal
 ct_pt_value = 32*31.25
-str_strat_name = 'T1M'
-reb_date = pd.Timestamp("2024-02-01")
+reb_date = pd.Timestamp("2024-01-04")
 sgnl_date = reb_date - pd.tseries.offsets.BDay(1)
-reb_sgnl = np.sign(df_TkM_sgnls.loc[sgnl_date, str_strat_name])
+reb_sgnl = df_TkM_sgnls.loc[sgnl_date, 'Trend']
 reb_sigma = np.sqrt(exante_var_estimate(t=sgnl_date))
 reb_size = np.floor(0.40/volat_estimate)
 reb_pos_size = reb_size*reb_sgnl
 reb_px_enter = data.loc[reb_date, 'Adj Close']
-reb_date_end = reb_date + pd.tseries.offsets.DateOffset(days=6)
+# reb_date_end = reb_date + pd.tseries.offsets.DateOffset(days=6) # a week later
+reb_date_end = sgnl_date + pd.tseries.offsets.BDay(20) # a month later
 reb_px_exit = data.loc[reb_date_end, 'Adj Close']
 reb_pnl = (reb_px_exit - reb_px_enter)*ct_pt_value*reb_pos_size
-reb_ret = np.log(reb_px_exit) - np.log(reb_px_enter)
+reb_ret = (np.log(reb_px_exit) - np.log(reb_px_enter))*reb_sgnl
 
-#%%
-# Strategy backtest
+#%% STRAT
+df_TkM_sgnls['xover'] = 0
+# Lagged returns xovers
+idx_xover_up = pd.concat([df_TkM_sgnls.shift().\
+                                   apply(lambda x: x['T1M']<x['T3M'], axis=1),
+                                   df_TkM_sgnls.\
+               apply(lambda x: x['T1M']>x['T3M'], axis=1)], axis=1).all(axis=1)
+df_TkM_sgnls.loc[idx_xover_up, 'xover'] = 1
+idx_xover_down = pd.concat([df_TkM_sgnls.shift().\
+                                   apply(lambda x: x['T1M']>x['T3M'], axis=1),
+                                   df_TkM_sgnls.\
+               apply(lambda x: x['T1M']<x['T3M'], axis=1)], axis=1).all(axis=1)
+df_TkM_sgnls.loc[idx_xover_down, 'xover'] = -1
+
+# Backtest
 ct_pt_value = 32*31.25
-str_strat_name = 'T1M'
 tmpcal = holidays.country_holidays('US')
 lst_holidays = [date.date() for date in pd.date_range('1999-01-01', '2034-01-01') if date in tmpcal]
 bdc = np.busdaycalendar(holidays=lst_holidays)
@@ -189,12 +224,16 @@ for i,r in df_reb_dates.items():
     try:
         # r is rebalance date
         sgnl_date = r - pd.tseries.offsets.CustomBusinessDay(1, calendar=bdc)
-        reb_sgnl = np.sign(df_TkM_sgnls.loc[sgnl_date, str_strat_name])
+        ## Trend assessment
+        reb_trend = df_TkM_sgnls.loc[sgnl_date, 'Trend']
+        reb_sgnl=reb_trend
+        ## Trade signal assessment
         reb_sigma = np.sqrt(exante_var_estimate(t=sgnl_date))
         reb_size = np.floor(0.40/reb_sigma)
         reb_pos_size = reb_size*reb_sgnl
         reb_px_enter = data.loc[r, 'Adj Close']
-        reb_date_end = r + pd.tseries.offsets.CustomBusinessDay(4, calendar=bdc)
+        # reb_date_end = r + pd.tseries.offsets.CustomBusinessDay(4, calendar=bdc)
+        reb_date_end = sgnl_date + pd.tseries.offsets.CustomBusinessDay(20, calendar=bdc)
         reb_px_exit = data.loc[reb_date_end, 'Adj Close']
         reb_pnl = (reb_px_exit - reb_px_enter)*ct_pt_value*reb_pos_size
         reb_ret = (np.log(reb_px_exit) - np.log(reb_px_enter))*reb_sgnl
@@ -203,6 +242,6 @@ for i,r in df_reb_dates.items():
     except:
         continue
 
-
-
+np.exp(df_strat['R'].cumsum()).plot()
+df_strat['PnL'].cumsum().plot()
 
