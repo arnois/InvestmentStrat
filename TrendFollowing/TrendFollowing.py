@@ -160,32 +160,14 @@ df_TkM_sgnls = data_ret_sgnl[data_ret_sgnl.index[0] + \
 df_TkM_sgnls = df_TkM_sgnls.apply(lambda x: x*np.array([1,12/9,12/6,12/3,12]), axis=1)
 
 # Trend rules
-idx_down = df_TkM_sgnls.apply(lambda x: x['T12M']>x['T9M'] and x['T9M']>x['T6M'],axis=1)
-idx_up = df_TkM_sgnls.apply(lambda x: x['T12M']<x['T9M'] and x['T9M']<x['T6M'],axis=1)
+idx_down = df_TkM_sgnls.apply(lambda x: x['T12M']>x['T9M'], axis=1)
+idx_up = df_TkM_sgnls.apply(lambda x: x['T12M']<x['T9M'], axis=1)
+## fill
 df_TkM_sgnls['Trend'] = 0
 df_TkM_sgnls.loc[idx_down,'Trend'] = -1
 df_TkM_sgnls.loc[idx_up,'Trend'] = 1
 
-# Rebalancing months
-tmp = set([(d.year,d.month) for d in df_TkM_sgnls.index])
-first_thursday = []
-for y,m in tmp:
-    weekly_thursday=[]
-    for week in calendar.monthcalendar(y, m):
-        if week[3] != 0:
-            weekly_thursday.append(week[3])
-    first_thursday.append(
-        pd.Timestamp(dt.date(y,m,weekly_thursday[0]).strftime("%Y-%m-%d")))
-df_reb_dates = pd.DataFrame(first_thursday, columns=['RebDate']).\
-    sort_values(by='RebDate').reset_index(drop=True)['RebDate']
-
-# Rebalancing dates weekly
-idx_reb_date = 3 # Thursday
-df_TkM_sgnls['isRebDate'] = [d.weekday() for d in df_TkM_sgnls.index]
-df_TkM_sgnls['isRebDate'] = df_TkM_sgnls['isRebDate'] == idx_reb_date
-df_reb_dates = df_TkM_sgnls[df_TkM_sgnls['isRebDate']].reset_index()['Date']
-
-# Example: investment signal
+#%% Example: investment signal
 ct_pt_value = 32*31.25
 reb_date = pd.Timestamp("2024-01-04")
 sgnl_date = reb_date - pd.tseries.offsets.BDay(1)
@@ -200,9 +182,66 @@ reb_px_exit = data.loc[reb_date_end, 'Adj Close']
 reb_pnl = (reb_px_exit - reb_px_enter)*ct_pt_value*reb_pos_size
 reb_ret = (np.log(reb_px_exit) - np.log(reb_px_enter))*reb_sgnl
 
-#%% STRAT
+#%% STRAT: Trend signal + rebalance period by holding time
+
+# MONTHLY rebalance
+tmp = set([(d.year,d.month) for d in df_TkM_sgnls.index])
+first_thursday = []
+for y,m in tmp:
+    weekly_thursday=[]
+    for week in calendar.monthcalendar(y, m):
+        if week[3] != 0:
+            weekly_thursday.append(week[3])
+    first_thursday.append(
+        pd.Timestamp(dt.date(y,m,weekly_thursday[0]).strftime("%Y-%m-%d")))
+df_reb_dates = pd.DataFrame(first_thursday, columns=['RebDate']).\
+    sort_values(by='RebDate').reset_index(drop=True)['RebDate']
+
+# WEEKLY rebalance
+idx_reb_date = 3 # Thursday
+df_TkM_sgnls['isRebDate'] = [d.weekday() for d in df_TkM_sgnls.index]
+df_TkM_sgnls['isRebDate'] = df_TkM_sgnls['isRebDate'] == idx_reb_date
+df_reb_dates = df_TkM_sgnls[df_TkM_sgnls['isRebDate']].reset_index()['Date']
+
+# calendar mgmt
+ct_pt_value = 32*31.25
+tmpcal = holidays.country_holidays('US')
+lst_holidays = [date.date() for date in pd.date_range('1999-01-01', '2034-01-01') if date in tmpcal]
+bdc = np.busdaycalendar(holidays=lst_holidays)
+
+# Backtest
+df_strat = pd.DataFrame()
+## Reb by period
+for i,r in df_reb_dates.items():
+    try:
+        # r is rebalance date
+        sgnl_date = r - pd.tseries.offsets.CustomBusinessDay(1, calendar=bdc)
+        ## Trend assessment
+        reb_trend = df_TkM_sgnls.loc[sgnl_date, 'Trend']
+        reb_sgnl = reb_trend
+        ## Trade signal assessment
+        reb_sigma = np.sqrt(exante_var_estimate(t=sgnl_date))
+        reb_size = np.floor(0.40/reb_sigma)
+        reb_pos_size = reb_size*reb_sgnl
+        reb_px_enter = data.loc[r, 'Adj Close']
+        reb_date_end = r + pd.tseries.offsets.CustomBusinessDay(4, calendar=bdc) # Weekly
+        # reb_date_end = sgnl_date + pd.tseries.offsets.CustomBusinessDay(20, calendar=bdc) # Monthly
+        reb_px_exit = data.loc[reb_date_end, 'Adj Close']
+        reb_pnl = (reb_px_exit - reb_px_enter)*ct_pt_value*reb_pos_size
+        reb_ret = (np.log(reb_px_exit) - np.log(reb_px_enter))*reb_sgnl
+        df_strat.loc[r,['Signal','Pos_Size','Px_Enter', 'Px_Exit','PnL','R']] = \
+            [reb_sgnl,reb_pos_size,reb_px_enter,reb_px_exit,reb_pnl,reb_ret]
+    except:
+        continue
+
+# Plot backtest res
+np.exp(df_strat['R'].cumsum()).plot(title='Trend: T12M vs T9M\nReb: Weekly')
+df_strat['PnL'].cumsum().plot()
+
+#%% STRAT: Trend filter + Xover signal
+
+# Lagged returns xovers: 1M vs 3M returns
 df_TkM_sgnls['xover'] = 0
-# Lagged returns xovers
 idx_xover_up = pd.concat([df_TkM_sgnls.shift().\
                                    apply(lambda x: x['T1M']<x['T3M'], axis=1),
                                    df_TkM_sgnls.\
@@ -214,34 +253,63 @@ idx_xover_down = pd.concat([df_TkM_sgnls.shift().\
                apply(lambda x: x['T1M']<x['T3M'], axis=1)], axis=1).all(axis=1)
 df_TkM_sgnls.loc[idx_xover_down, 'xover'] = -1
 
-# Backtest
-ct_pt_value = 32*31.25
-tmpcal = holidays.country_holidays('US')
-lst_holidays = [date.date() for date in pd.date_range('1999-01-01', '2034-01-01') if date in tmpcal]
-bdc = np.busdaycalendar(holidays=lst_holidays)
-df_strat = pd.DataFrame()
-for i,r in df_reb_dates.items():
-    try:
-        # r is rebalance date
-        sgnl_date = r - pd.tseries.offsets.CustomBusinessDay(1, calendar=bdc)
-        ## Trend assessment
-        reb_trend = df_TkM_sgnls.loc[sgnl_date, 'Trend']
-        reb_sgnl=reb_trend
-        ## Trade signal assessment
-        reb_sigma = np.sqrt(exante_var_estimate(t=sgnl_date))
-        reb_size = np.floor(0.40/reb_sigma)
-        reb_pos_size = reb_size*reb_sgnl
-        reb_px_enter = data.loc[r, 'Adj Close']
-        # reb_date_end = r + pd.tseries.offsets.CustomBusinessDay(4, calendar=bdc)
-        reb_date_end = sgnl_date + pd.tseries.offsets.CustomBusinessDay(20, calendar=bdc)
-        reb_px_exit = data.loc[reb_date_end, 'Adj Close']
-        reb_pnl = (reb_px_exit - reb_px_enter)*ct_pt_value*reb_pos_size
-        reb_ret = (np.log(reb_px_exit) - np.log(reb_px_enter))*reb_sgnl
-        df_strat.loc[r,['Signal','Pos_Size','Px_Enter', 'Px_Exit','PnL','R']] = \
-            [reb_sgnl,reb_pos_size,reb_px_enter,reb_px_exit,reb_pnl,reb_ret]
-    except:
-        continue
+# 1M returns sign xover
+df_TkM_sgnls['xover'] = 0
+idx_xover_up = pd.concat([df_TkM_sgnls.shift().\
+                                   apply(lambda x: x['T1M'] < 0, axis=1),
+                                   df_TkM_sgnls.\
+               apply(lambda x: x['T1M'] > 0, axis=1)], axis=1).all(axis=1)
+df_TkM_sgnls.loc[idx_xover_up, 'xover'] = 1
+idx_xover_down = pd.concat([df_TkM_sgnls.shift().\
+                                   apply(lambda x: x['T1M'] > 0, axis=1),
+                                   df_TkM_sgnls.\
+               apply(lambda x: x['T1M'] < 0, axis=1)], axis=1).all(axis=1)
+df_TkM_sgnls.loc[idx_xover_down, 'xover'] = -1
 
-np.exp(df_strat['R'].cumsum()).plot()
-df_strat['PnL'].cumsum().plot()
+## Reb by signal
+df_reb_events = df_TkM_sgnls[['Trend','xover']][df_TkM_sgnls['xover'] != 0]
+df_strat_byXover = pd.DataFrame()
+for i,r in df_reb_events.iterrows():
+    if r['Trend']*r['xover'] == 1: # Trade
+        try:
+            # i is rebalance date provided a xover
+            sgnl_date = i
+        
+            ## Signal
+            reb_sgnl = r['xover']
+           
+            ## Trade signal assessment
+            reb_sigma = np.sqrt(exante_var_estimate(t=sgnl_date))
+            reb_size = np.floor(0.40/reb_sigma)
+            reb_pos_size = reb_size*reb_sgnl
+            reb_px_enter = data.loc[i, 'Adj Close']
+            df_strat_byXover.loc[i,['Signal','Pos_Size','Px_Enter']] = \
+                [reb_sgnl,reb_pos_size,reb_px_enter]
+        except:
+            continue
+    else: # Cannot trade
+        continue
+### Trades evaluation
+tmpdf = pd.DataFrame()
+for j,q in df_strat_byXover.iterrows():
+    # Trade signal position
+    curr_signal = q['Signal']
+    # Trade date
+    idx_close_date = df_reb_events.\
+        index[pd.concat([df_reb_events['xover'] == curr_signal*-1, 
+                         pd.Series(df_reb_events.index > j, 
+                                   index=df_reb_events.index)], 
+                        axis=1).all(axis=1)][0]
+    # Closing price
+    px_exit = data.loc[idx_close_date, 'Adj Close']
+    closing_ret = (px_exit/q['Px_Enter']-1)*curr_signal
+    
+    # df fill
+    tmpdf.loc[j,['Close_Date', 'Px_Exit', 'R']] = [idx_close_date, px_exit, closing_ret]
+### update
+df_strat_byXover = df_strat_byXover.merge(tmpdf,left_index=True, right_index=True) 
+
+# Results plot
+np.exp(df_strat_byXover['R'].cumsum()).plot(title='Trend: T12M vs T9M\nReb: 1Mxo3M')
+
 
