@@ -17,7 +17,30 @@ from pandas_datareader import data as pdr
 yf.pdr_override()
 import holidays
 import calendar
-#%% Futures Data
+
+#%% UDF
+# function to get statistics for different variables in a dataframe
+def statistics(data):
+    """
+    Returns: Summary stats for each serie in the input DataFrame.
+    """
+    from scipy import stats
+    tmpmu = np.round(data.mean().values,4)
+    tmptmu_5pct = np.round(stats.trim_mean(data, 0.05),4)
+    tmpiqr = np.round(data.apply(stats.iqr).values,4)
+    tmpstd = np.round(data.std().values,4)
+    tmpskew = np.round(data.apply(stats.skew).values,4)
+    tmpme = np.round(data.median().values,4)
+    tmpkurt = np.round(data.apply(stats.kurtosis).values,4)
+    tmpcol = ['Mean', '5% Trimmed Mean', 'Interquartile Range', 
+              'Standard Deviation', 'Skewness', 'Median', 'Kurtosis']
+    tmpdf = pd.DataFrame([tmpmu, tmptmu_5pct, tmpiqr,
+                        tmpstd, tmpskew, tmpme, tmpkurt]).T
+    tmpdf.columns = tmpcol
+    tmpdf.index = data.columns
+    return tmpdf
+
+#%% DATA
 # for demo purposes we are using ZN (10Y T-Note) futures contract
 
 # Dates range
@@ -59,7 +82,7 @@ if isDataOOD:
     updated_data.to_parquet(path)
     data = pd.read_parquet(path)
 
-#%% ZN Price Viz
+#%% ZN PRICE VIZ
 ## Plotting T3Y Price
 fig, ax = plt.subplots()
 ax.plot(data.loc['2024':,'Adj Close'], '-', color='darkcyan')
@@ -71,20 +94,21 @@ ax.set_title('10Y T-Note Future')
 plt.xticks(rotation=45)
 plt.tight_layout(); plt.show()
 
-#%% TSM
+#%% RETURNS
 # Daily log-prices
 data_logP = data[['Adj Close']].apply(np.log)
 
 # Daily returns
 data_ret = data_logP.diff().fillna(0)
 ema_alpha = 1-60/61
-data_ret['EMA'] = data_ret.ewm(span=121, adjust=False).mean()
+data_ret['EMA'] = data_ret['Adj Close'].ewm(span=32, adjust=False).mean()
 
 # Cum return index
 data_idx = data_ret.cumsum().apply(np.exp)
 t1y_date = todays_date - pd.tseries.offsets.DateOffset(years=1)
 data_idx.loc[t1y_date:].plot(color=['darkcyan','orange'])
 
+#%% VOLATILITY
 # Function to compute daily ex ante variance estimate
 def exante_var_estimate(t: pd.Timestamp = pd.Timestamp("2024-02-07"), 
                         alpha: float = 1-60/61) -> float:
@@ -125,17 +149,18 @@ volat_estimate = np.sqrt(exante_var_estimate(t=todays_date))
 # Position size - constant vol
 pos_size = np.floor(0.40/volat_estimate)
 
-#%% RETURNS
+#%% TRAILING RETURNS
 # Last k months smoothed return
 kmonths = [12,9,6,3,1]
-idxdt = todays_date - pd.tseries.offsets.DateOffset(days=1)
+
 df_idx_dates = pd.DataFrame(
-    [idxdt - pd.tseries.offsets.DateOffset(months=n) for n in kmonths],
+    [todays_date - pd.tseries.offsets.DateOffset(months=n) for n in kmonths],
     columns=['Idx_Date'],
     index=[f"T{n}M" for n in kmonths])
 
 df_kM_ret = df_idx_dates.\
-    apply(lambda d: np.exp(data_ret['EMA'].loc[d[0]:idxdt].sum())-1, axis=1)
+    apply(lambda d: np.exp(data_ret['EMA'].loc[d[0]:todays_date].sum())-1, 
+          axis=1)*np.array([1,12/9,12/6,12/3,12])
 
 # Last k-month returns for each previous dates
 data_ret_sgnl = pd.DataFrame(index=data_ret.index)
@@ -160,8 +185,8 @@ df_TkM_sgnls = data_ret_sgnl[data_ret_sgnl.index[0] + \
 df_TkM_sgnls = df_TkM_sgnls.apply(lambda x: x*np.array([1,12/9,12/6,12/3,12]), axis=1)
 
 # Trend rules
-idx_down = df_TkM_sgnls.apply(lambda x: x['T12M']>x['T9M'], axis=1)
-idx_up = df_TkM_sgnls.apply(lambda x: x['T12M']<x['T9M'], axis=1)
+idx_down = df_TkM_sgnls.apply(lambda x: 0 > x['T9M'], axis=1) # df_TkM_sgnls.apply(lambda x: x['T12M']>x['T9M'], axis=1)
+idx_up = df_TkM_sgnls.apply(lambda x: 0 < x['T9M'], axis=1) # df_TkM_sgnls.apply(lambda x: x['T12M']<x['T9M'], axis=1)
 ## fill
 df_TkM_sgnls['Trend'] = 0
 df_TkM_sgnls.loc[idx_down,'Trend'] = -1
@@ -235,7 +260,8 @@ for i,r in df_reb_dates.items():
         continue
 
 # Plot backtest res
-np.exp(df_strat['R'].cumsum()).plot(title='Trend: T12M vs T9M\nReb: Weekly')
+np.exp(df_strat['R'].cumsum()).plot(title='Trend: T9M Sign\nReb: Weekly')
+statistics(df_strat[['R','PnL']]).T
 df_strat['PnL'].cumsum().plot()
 
 #%% STRAT: Trend filter + Xover signal
@@ -294,12 +320,15 @@ tmpdf = pd.DataFrame()
 for j,q in df_strat_byXover.iterrows():
     # Trade signal position
     curr_signal = q['Signal']
-    # Trade date
-    idx_close_date = df_reb_events.\
-        index[pd.concat([df_reb_events['xover'] == curr_signal*-1, 
-                         pd.Series(df_reb_events.index > j, 
-                                   index=df_reb_events.index)], 
-                        axis=1).all(axis=1)][0]
+    # Closing date
+    if not np.any(df_reb_events.index > j): # If still not closing date
+        idx_close_date = data.index[-1] # last date available
+    else:
+        idx_close_date = df_reb_events.\
+            index[pd.concat([df_reb_events['xover'] == curr_signal*-1, 
+                             pd.Series(df_reb_events.index > j, 
+                                       index=df_reb_events.index)], 
+                            axis=1).all(axis=1)][0]
     # Closing price
     px_exit = data.loc[idx_close_date, 'Adj Close']
     closing_ret = (px_exit/q['Px_Enter']-1)*curr_signal
@@ -308,8 +337,129 @@ for j,q in df_strat_byXover.iterrows():
     tmpdf.loc[j,['Close_Date', 'Px_Exit', 'R']] = [idx_close_date, px_exit, closing_ret]
 ### update
 df_strat_byXover = df_strat_byXover.merge(tmpdf,left_index=True, right_index=True) 
+df_strat_byXover['PnL'] = df_strat_byXover.\
+    apply(lambda x: 
+          (x['Px_Exit'] - x['Px_Enter'])*x['Pos_Size']*x['Signal']*ct_pt_value, 
+          axis=1)
 
 # Results plot
-np.exp(df_strat_byXover['R'].cumsum()).plot(title='Trend: T12M vs T9M\nReb: 1Mxo3M')
+np.exp(df_strat_byXover['R'].cumsum()).plot(title='Trend: T9M Sign\nReb: 1Mxo3M')
+statistics(df_strat_byXover[['R','PnL']]).T
+df_strat_byXover['PnL'].cumsum().plot()
 
+#%% DISTRIBUTION ANALYSIS
+from statsmodels.distributions.empirical_distribution import ECDF
+from scipy import stats
+
+# Returns distribution
+rhist = df_strat_byXover['R'].plot.hist(title='Xover Returns', density=True)
+rhist = df_strat['R'].plot.hist(title='1M-Holding Returns', density=True)
+recdf = ECDF(df_strat_byXover['R'])
+recdf = ECDF(df_strat['R'])
+
+#%% EMPIRICAL DISTRIBUTION SAMPLING
+
+# function for random samples generator from empirical distribution
+def empirical_sample(ecdf, size):
+    u = np.random.uniform(0,1,size)
+    ecdf_x = np.delete(ecdf.x,0)
+    sample = []
+    for u_y in u:
+        idx = np.argmax(ecdf.y >= u_y)-1
+        e_x = ecdf_x[idx]
+        sample.append(e_x)
+    return pd.Series(sample,name='emp_sample')
+
+# function for paths generator from empirical distribution
+def sim_path_R(ecdf, sample_size=1000, paths_size=1000):
+    runs = []
+    for n in range(paths_size):
+        run = empirical_sample(ecdf,sample_size)
+        run.name = run.name + f'{n+1}'
+        runs.append(run.cumsum())
+    df_runs = pd.concat(runs, axis = 1)
+    df_runs.index = df_runs.index + 1
+    df_runs = pd.concat([pd.DataFrame(np.zeros((1,paths_size)),
+                                      columns=df_runs.columns),
+               df_runs])
+    return df_runs
+
+#%% SAMPLING RETURNS PATHS
+
+# Sim
+N_sim = 10000
+N_sample = df_strat_byXover.shape[0]
+runs_myR = sim_path_R(recdf, sample_size=N_sample, paths_size=N_sim)
+runs_myR.plot(title=f'Cumulative Returns Simulations\n'\
+              f'N(paths)={N_sim}, N(sample) ={N_sample}',
+              legend=False)
+plt.grid(alpha=0.5, linestyle='--')
+# Simulation results
+simmean = runs_myR.mean(axis=1)
+simstd = runs_myR.std(axis=1)
+simqtl = runs_myR.quantile(q=(0.025,1-0.025),axis=1).T
+simres = [simmean, simmean-2*simstd, simmean+2*simstd, 
+          simqtl]
+avgsim = pd.concat(simres,axis=1)
+avgsim.columns = ['Avg Path','LB-2std','UB-2std',
+                  f'{2.5}%-q',f'{97.5}%-q']
+avgsim.plot(title='Cumulative Returns Simulations\nMean path\n'\
+            f'N(paths)={N_sim}, N(sample) ={N_sample}', 
+            style=['-','--','--','--','--'])
+plt.grid(alpha=0.5, linestyle='--')
+
+# Simulation stats
+(runs_myR.mean()/runs_myR.std()).mean()
+(runs_myR.mean()/runs_myR.std()).std()
+(runs_myR.mean()/runs_myR.std()).plot.hist(title =\
+                                'Sharpe Ratios\nCum. Returns Sims', 
+                                density = True)
+
+#%% POSITION SIZING
+
+N_sim = 1000
+N_sample = df_strat_byXover.shape[0]
+dic_bal = {}
+for n in range(N_sim):
+    sim_r = empirical_sample(recdf,N_sample)
+    init_capital = 100 
+    pos_size_pct = 0.002
+    pnl = np.array([])
+    balance = np.array([init_capital])
+    for r in sim_r:
+        trade_pos_size = pos_size_pct*balance[-1]
+        trade_pnl = r*trade_pos_size
+        pnl = np.append(pnl,trade_pnl)
+        balance = np.append(balance,balance[-1]+trade_pnl)
+    dic_bal[f'run{n+1}'] = balance
+
+# Equity curve sim results    
+df_bal = pd.DataFrame(dic_bal)
+df_bal.plot(title=f'Equity Curve Sim\n'\
+              f'N(paths)={N_sim}, N(sample) ={N_sample}',
+              legend=False)
+plt.grid(alpha=0.5, linestyle='--')
+
+# Sharpe ratios dist
+sharpes = np.array((df_bal.mean()-100)/df_bal.std())
+plt.hist(sharpes, density = True)
+plt.title('Sharpe Ratios\nEquity Curve Sims')
+plt.show()
+
+# Sharpes stats
+sharpes_mu = np.mean(sharpes)
+sharpes_me = np.median(sharpes)
+sharpes_mo = 3*sharpes_me - 2*sharpes_mu
+(sharpes_mu, sharpes_me, sharpes_mo)
+np.std(sharpes)
+stats.mode(sharpes)
+
+# Original method for mode
+sharpes_histogram = np.histogram(sharpes)
+L = sharpes_histogram[1][np.argmax(sharpes_histogram[0])]
+f1 = sharpes_histogram[0][np.argmax(sharpes_histogram[0])]
+f0 = sharpes_histogram[0][np.argmax(sharpes_histogram[0])-1]
+f2 = sharpes_histogram[0][np.argmax(sharpes_histogram[0])+1]
+cls_i = np.diff(sharpes_histogram[1])[0]
+mo = L + (f1-f0)/(2*f1-f0-f2)*cls_i
 
