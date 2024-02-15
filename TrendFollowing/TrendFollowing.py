@@ -106,7 +106,8 @@ data_ret['EMA'] = data_ret['Adj Close'].ewm(span=32, adjust=False).mean()
 # Cum return index
 data_idx = data_ret.cumsum().apply(np.exp)
 t1y_date = todays_date - pd.tseries.offsets.DateOffset(years=1)
-data_idx.loc[t1y_date:].plot(color=['darkcyan','orange'])
+data_idx.loc['2024':].plot(color=['darkcyan','orange'], title='10Y T-Note Idx')
+data_idx.loc[t1y_date:].plot(color=['darkcyan','orange'], title='10Y TNote Idx')
 
 #%% VOLATILITY
 # Function to compute daily ex ante variance estimate
@@ -163,6 +164,35 @@ df_kM_ret = df_idx_dates.\
           axis=1)*np.array([1,12/9,12/6,12/3,12])
 
 # Last k-month returns for each previous dates
+data_ret_sgnl = pd.DataFrame(index=data_ret.index)
+for i,r in data_ret.iterrows():
+    # End date
+    j = i - pd.tseries.offsets.DateOffset(days=1)
+    # Starting dates
+    curr_idx_dates = pd.DataFrame(
+        [j - pd.tseries.offsets.DateOffset(months=n) for n in kmonths],
+        columns=['Idx_Date'],
+        index=[f"T{n}M" for n in kmonths])
+    # k-month smoother returns
+    curr_kM_ret = curr_idx_dates.\
+        apply(lambda d: np.exp(data_ret['EMA'].loc[d[0]:j].sum())-1, axis=1)
+    # Fill df
+    data_ret_sgnl.loc[i,curr_kM_ret.index.tolist()] = curr_kM_ret.values
+
+#%% FWD RETURNS
+# Fwd k-weeks returns
+kweeks = [12,4,2,1]
+
+df_fwd_dates = pd.DataFrame(
+    [todays_date + pd.tseries.offsets.DateOffset(weeks=n) for n in kweeks],
+    columns=['Idx_Date'],
+    index=[f"F{n}W" for n in kweeks])
+
+df_fwd_dates_ret = df_fwd_dates.\
+    apply(lambda d: np.exp(data_ret['EMA'].loc[todays_date:d[0]].sum())-1, 
+          axis=1)
+
+# Fwd k-weeks returns for each previous dates
 data_ret_sgnl = pd.DataFrame(index=data_ret.index)
 for i,r in data_ret.iterrows():
     # End date
@@ -243,7 +273,7 @@ for i,r in df_reb_dates.items():
         sgnl_date = r - pd.tseries.offsets.CustomBusinessDay(1, calendar=bdc)
         ## Trend assessment
         reb_trend = df_TkM_sgnls.loc[sgnl_date, 'Trend']
-        reb_sgnl = reb_trend
+        reb_sgnl = reb_trend*(np.sign(df_TkM_sgnls.loc[sgnl_date, 'T1M']) == reb_trend)
         ## Trade signal assessment
         reb_sigma = np.sqrt(exante_var_estimate(t=sgnl_date))
         reb_size = np.floor(0.40/reb_sigma)
@@ -251,7 +281,10 @@ for i,r in df_reb_dates.items():
         reb_px_enter = data.loc[r, 'Adj Close']
         reb_date_end = r + pd.tseries.offsets.CustomBusinessDay(4, calendar=bdc) # Weekly
         # reb_date_end = sgnl_date + pd.tseries.offsets.CustomBusinessDay(20, calendar=bdc) # Monthly
-        reb_px_exit = data.loc[reb_date_end, 'Adj Close']
+        if reb_date_end > data.index[-1]:
+            reb_px_exit = data.iloc[-1]['Adj Close']
+        else:
+            reb_px_exit = data.loc[reb_date_end, 'Adj Close']
         reb_pnl = (reb_px_exit - reb_px_enter)*ct_pt_value*reb_pos_size
         reb_ret = (np.log(reb_px_exit) - np.log(reb_px_enter))*reb_sgnl
         df_strat.loc[r,['Signal','Pos_Size','Px_Enter', 'Px_Exit','PnL','R']] = \
@@ -260,7 +293,7 @@ for i,r in df_reb_dates.items():
         continue
 
 # Plot backtest res
-np.exp(df_strat['R'].cumsum()).plot(title='Trend: T9M Sign\nReb: Weekly')
+np.exp(df_strat['R'].cumsum()).plot(title='Trend: T9M Sign\nReb: Weekly+T1M')
 statistics(df_strat[['R','PnL']]).T
 df_strat['PnL'].cumsum().plot()
 
@@ -343,7 +376,7 @@ df_strat_byXover['PnL'] = df_strat_byXover.\
           axis=1)
 
 # Results plot
-np.exp(df_strat_byXover['R'].cumsum()).plot(title='Trend: T9M Sign\nReb: 1Mxo3M')
+np.exp(df_strat_byXover['R'].cumsum()).plot(title='Trend: T9M Sign\nReb: 1Mxo0')
 statistics(df_strat_byXover[['R','PnL']]).T
 df_strat_byXover['PnL'].cumsum().plot()
 
