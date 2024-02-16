@@ -50,7 +50,7 @@ str_idt, str_fdt = '2000-12-31', '2023-12-31'
 yh_tkrlst = ['ZN=F']
 
 # Data pull
-path = r'C:\Users\arnoi\Documents\Python Scripts\db\futures_10Y_yf.parquet'
+path = r'C:\Users\arnoi\Documents\Python Scripts\db\futures_ZN_yf.parquet'
 path = r'H:\db\futures_ZN_yf.parquet'
 if os.path.isfile(path):
     # From saved db
@@ -65,7 +65,8 @@ else:
 
 # Data update
 last_date_data = data.index[-1]
-todays_date = pd.Timestamp(dt.datetime.today().date()) - pd.tseries.offsets.BDay(1)
+todays_date = pd.Timestamp(dt.datetime.today().date()) - pd.tseries.offsets.\
+    BDay(1)
 isDataOOD = last_date_data < todays_date
 if isDataOOD:
     print("Updating data... ")
@@ -90,7 +91,7 @@ myFmt = mdates.DateFormatter('%b%y')
 ax.xaxis.set_major_formatter(myFmt)
 ax.set_xlabel('')
 ax.set_ylabel('Price')
-ax.set_title('10Y T-Note Future')
+ax.set_title('10Y T-Note Future (ZN)')
 plt.xticks(rotation=45)
 plt.tight_layout(); plt.show()
 
@@ -101,13 +102,26 @@ data_logP = data[['Adj Close']].apply(np.log)
 # Daily returns
 data_ret = data_logP.diff().fillna(0)
 ema_alpha = 1-60/61
-data_ret['EMA'] = data_ret['Adj Close'].ewm(span=32, adjust=False).mean()
+data_ret['EMA'] = data_ret['Adj Close'].ewm(span=16, adjust=False).mean()
 
 # Cum return index
 data_idx = data_ret.cumsum().apply(np.exp)
 t1y_date = todays_date - pd.tseries.offsets.DateOffset(years=1)
-data_idx.loc['2024':].plot(color=['darkcyan','orange'], title='10Y T-Note Idx')
-data_idx.loc[t1y_date:].plot(color=['darkcyan','orange'], title='10Y TNote Idx')
+data_idx.loc['2024':].plot(color=['darkcyan','orange'], 
+                           title='ZN Returns Idx')
+data_idx.loc[t1y_date:].plot(color=['darkcyan','orange'], 
+                             title='ZN Returns Idx')
+
+# Volatility
+data_ret_sigma = (data_ret[['Adj Close']].\
+                  rolling(21).std()*np.sqrt(252)).dropna()
+data_ret_sigma = (data_ret[['Adj Close']].\
+                  ewm(span=252, adjust=False).std()*np.sqrt(252)).\
+    iloc[252:].rename(columns={'Adj Close':'EMA'}).merge(data_ret_sigma, 
+                                                         left_index=True,
+                                                         right_index=True)
+statistics(data_ret_sigma).T
+data_ret_sigma.plot(title='ZN Volatility', alpha=0.65)
 
 #%% VOLATILITY
 # Function to compute daily ex ante variance estimate
@@ -162,8 +176,25 @@ df_idx_dates = pd.DataFrame(
 df_kM_ret = df_idx_dates.\
     apply(lambda d: np.exp(data_ret['EMA'].loc[d[0]:todays_date].sum())-1, 
           axis=1)*np.array([1,12/9,12/6,12/3,12])
-
+    
 # Last k-month returns for each previous dates
+data_ret_kM = pd.DataFrame(index=data_ret.index)
+for i,r in data_ret.iterrows():
+    # End date
+    j = i - pd.tseries.offsets.DateOffset(days=1)
+    # Starting dates
+    curr_idx_dates = pd.DataFrame(
+        [j - pd.tseries.offsets.DateOffset(months=n) for n in kmonths],
+        columns=['Idx_Date'],
+        index=[f"T{n}M" for n in kmonths])
+    # k-month returns
+    curr_kM_ret = curr_idx_dates.\
+        apply(lambda d: 
+              np.exp(data_ret['Adj Close'].loc[d[0]:j].sum())-1, axis=1)
+    # Fill df
+    data_ret_kM.loc[i,curr_kM_ret.index.tolist()] = curr_kM_ret.values
+
+# Last k-month smoothed returns for each previous dates
 data_ret_sgnl = pd.DataFrame(index=data_ret.index)
 for i,r in data_ret.iterrows():
     # End date
@@ -193,20 +224,30 @@ df_fwd_dates_ret = df_fwd_dates.\
           axis=1)
 
 # Fwd k-weeks returns for each previous dates
-data_ret_sgnl = pd.DataFrame(index=data_ret.index)
-for i,r in data_ret.iterrows():
-    # End date
-    j = i - pd.tseries.offsets.DateOffset(days=1)
-    # Starting dates
-    curr_idx_dates = pd.DataFrame(
-        [j - pd.tseries.offsets.DateOffset(months=n) for n in kmonths],
+tmpdt_st = data_ret.index[1] + pd.tseries.offsets.DateOffset(weeks=12)
+tmpdt_ed = data_ret.index[-2] - pd.tseries.offsets.DateOffset(weeks=12)
+data_ret_fwd = pd.DataFrame(index=data_ret.\
+                            loc[data_ret.index[1]:tmpdt_ed].index)
+for i,r in data_ret.loc[data_ret.index[1]:tmpdt_ed].iterrows():
+    # Ending fwd dates
+    curr_idx_fwd_dates = pd.DataFrame(
+        [i + pd.tseries.offsets.DateOffset(weeks=n) for n in kweeks],
         columns=['Idx_Date'],
-        index=[f"T{n}M" for n in kmonths])
-    # k-month smoother returns
-    curr_kM_ret = curr_idx_dates.\
-        apply(lambda d: np.exp(data_ret['EMA'].loc[d[0]:j].sum())-1, axis=1)
+        index=[f"F{n}W" for n in kweeks])
+    # Fwd k-week returns
+    curr_fwd_ret = curr_idx_fwd_dates.\
+        apply(lambda d: 
+              np.exp(data_ret['Adj Close'].loc[i:d[0]].sum())-1, 
+              axis=1)
     # Fill df
-    data_ret_sgnl.loc[i,curr_kM_ret.index.tolist()] = curr_kM_ret.values
+    data_ret_fwd.loc[i, curr_fwd_ret.index.tolist()] = curr_fwd_ret.values
+
+#%% TRAILING VS FWD RETURNS
+df_ret_TvF = data_ret_fwd.merge(data_ret_kM,left_index=True,right_index=True)
+# scatter
+from pandas.plotting import scatter_matrix
+scatter_matrix(df_ret_TvF[['F12W','F4W','F2W','F1W','T9M']], alpha=0.5, 
+               figsize=(10, 6), diagonal='kde')
 
 #%% TREND
 # Annualized k-month returns
@@ -495,4 +536,3 @@ f0 = sharpes_histogram[0][np.argmax(sharpes_histogram[0])-1]
 f2 = sharpes_histogram[0][np.argmax(sharpes_histogram[0])+1]
 cls_i = np.diff(sharpes_histogram[1])[0]
 mo = L + (f1-f0)/(2*f1-f0-f2)*cls_i
-
