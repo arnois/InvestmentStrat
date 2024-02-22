@@ -40,6 +40,54 @@ def statistics(data):
     tmpdf.index = data.columns
     return tmpdf
 
+# function to manage row and column ranges
+def sliceDataFrame(df, dt_start = None, dt_end = None, lst_securities = None):
+    # columns verification
+    lstIsEmpty = (lst_securities is None) or (lst_securities == [])
+    if lstIsEmpty:
+        tmpsecs = df.columns.tolist()
+    else:
+        tmpsecs = lst_securities
+    
+    # column-filtered df
+    tmpdfret = df[tmpsecs]
+
+    # date range verification
+    if (dt_start is None) or not (np.any(tmpdfret.index >= pd.to_datetime(dt_start))):
+        tmpstr1 = df.index.min()
+    else:
+        tmpstr1 = dt_start
+    if (dt_end is None) or not (np.any(tmpdfret.index >= pd.to_datetime(dt_end))):
+        tmpstr2 = df.index.max()
+    else:
+        tmpstr2 = dt_end
+        
+    return tmpdfret.loc[tmpstr1:tmpstr2,tmpsecs].dropna()
+
+# funciton to plot correlation matrix among features
+def plot_corrmatrix(df, dt_start = None, dt_end = None, lst_securities = None, 
+                    plt_size = (10,8), txtCorr = False, corrM = 'spearman'):
+    """
+    Returns: Correlation matrix.
+    """
+    from seaborn import heatmap
+    # securities and date ranges verification
+    df_ = sliceDataFrame(df=df, dt_start=dt_start, 
+                         dt_end=dt_end, lst_securities=lst_securities)
+    tmpdfret = df_
+    
+    # corrmatrix
+    plt.figure(figsize=plt_size)
+    heatmap(
+        tmpdfret.corr(method=corrM.lower()),        
+        cmap='RdBu', 
+        annot=txtCorr, 
+        vmin=-1, vmax=1,
+        fmt='.2f')
+    plt.title(corrM.title(), size=20)
+    plt.tight_layout();plt.show()
+    return None
+
 #%% DATA
 # for demo purposes we are using ZN (10Y T-Note) futures contract
 
@@ -47,11 +95,11 @@ def statistics(data):
 str_idt, str_fdt = '2000-12-31', '2023-12-31'
 
 # Futures symbols
-yh_tkrlst = ['ZN=F']
+yh_tkrlst = ['ZT=F'] # ZT=F, ZF=F
 
 # Data pull
-path = r'C:\Users\arnoi\Documents\Python Scripts\db\futures_ZN_yf.parquet'
-path = r'H:\db\futures_ZN_yf.parquet'
+path = r'C:\Users\arnoi\Documents\Python Scripts\db\futures_'+yh_tkrlst[0][:2]+'_yf.parquet'
+path = r'H:\db\futures_'+yh_tkrlst[0][:2]+'_yf.parquet'
 if os.path.isfile(path):
     # From saved db
     data = pd.read_parquet(path)
@@ -83,15 +131,15 @@ if isDataOOD:
     updated_data.to_parquet(path)
     data = pd.read_parquet(path)
 
-#%% ZN PRICE VIZ
+#%% PRICE VIZ
 ## Plotting T3Y Price
 fig, ax = plt.subplots()
 ax.plot(data.loc['2024':,'Adj Close'], '-', color='darkcyan')
-myFmt = mdates.DateFormatter('%b%y')
+myFmt = mdates.DateFormatter('%d%b')
 ax.xaxis.set_major_formatter(myFmt)
 ax.set_xlabel('')
 ax.set_ylabel('Price')
-ax.set_title('10Y T-Note Future (ZN)')
+ax.set_title(f'{yh_tkrlst[0][:2]} Future')
 plt.xticks(rotation=45)
 plt.tight_layout(); plt.show()
 
@@ -108,9 +156,9 @@ data_ret['EMA'] = data_ret['Adj Close'].ewm(span=16, adjust=False).mean()
 data_idx = data_ret.cumsum().apply(np.exp)
 t1y_date = todays_date - pd.tseries.offsets.DateOffset(years=1)
 data_idx.loc['2024':].plot(color=['darkcyan','orange'], 
-                           title='ZN Returns Idx')
+                           title=f'{yh_tkrlst[0][:2]} Returns Idx')
 data_idx.loc[t1y_date:].plot(color=['darkcyan','orange'], 
-                             title='ZN Returns Idx')
+                             title=f'{yh_tkrlst[0][:2]} Returns Idx')
 
 # Volatility
 data_ret_sigma = (data_ret[['Adj Close']].\
@@ -121,7 +169,7 @@ data_ret_sigma = (data_ret[['Adj Close']].\
                                                          left_index=True,
                                                          right_index=True)
 statistics(data_ret_sigma).T
-data_ret_sigma.plot(title='ZN Volatility', alpha=0.65)
+data_ret_sigma.loc['2023-02-21':].plot(title=f'{yh_tkrlst[0][:2]} Volatility', alpha=0.65)
 
 #%% VOLATILITY
 # Function to compute daily ex ante variance estimate
@@ -194,6 +242,8 @@ for i,r in data_ret.iterrows():
     # Fill df
     data_ret_kM.loc[i,curr_kM_ret.index.tolist()] = curr_kM_ret.values
 
+#data_ret_kM = data_ret_kM*np.array([1,12/9,12/6,12/3,12])
+
 # Last k-month smoothed returns for each previous dates
 data_ret_sgnl = pd.DataFrame(index=data_ret.index)
 for i,r in data_ret.iterrows():
@@ -209,6 +259,8 @@ for i,r in data_ret.iterrows():
         apply(lambda d: np.exp(data_ret['EMA'].loc[d[0]:j].sum())-1, axis=1)
     # Fill df
     data_ret_sgnl.loc[i,curr_kM_ret.index.tolist()] = curr_kM_ret.values
+
+# data_ret_sgnl = data_ret_sgnl*np.array([1,12/9,12/6,12/3,12])
 
 #%% FWD RETURNS
 # Fwd k-weeks returns
@@ -241,13 +293,50 @@ for i,r in data_ret.loc[data_ret.index[1]:tmpdt_ed].iterrows():
               axis=1)
     # Fill df
     data_ret_fwd.loc[i, curr_fwd_ret.index.tolist()] = curr_fwd_ret.values
+    
+# data_ret_fwd = data_ret_fwd*np.array([52/12,52/4,52/2,52/1])
 
 #%% TRAILING VS FWD RETURNS
 df_ret_TvF = data_ret_fwd.merge(data_ret_kM,left_index=True,right_index=True)
 # scatter
 from pandas.plotting import scatter_matrix
-scatter_matrix(df_ret_TvF[['F12W','F4W','F2W','F1W','T9M']], alpha=0.5, 
+scatter_matrix(df_ret_TvF[['F12W','F4W','F2W','F1W','T12M']], alpha=0.5, 
                figsize=(10, 6), diagonal='kde')
+# corr
+plot_corrmatrix(df_ret_TvF, dt_start = '2021-02-20', dt_end = '2024-02-20', 
+                lst_securities = ['F12W','F4W','F2W','F1W',
+                                  'T12M','T9M','T6M','T3M','T1M'], 
+                plt_size = (10,8), txtCorr = False, corrM = 'spearman')
+# Corr between fwd and trailing returns
+df_ret_TvF.corr(method='spearman').loc[['F12W','F4W','F2W','F1W'],['T1M','T3M','T6M','T9M','T12M']]
+
+## REGAN
+from scipy import stats
+from sklearn.linear_model import LinearRegression
+mlr = LinearRegression()
+
+# Row slice
+row_ed_dt = pd.Timestamp('2023-11-28')
+row_st_dt = row_ed_dt - pd.tseries.offsets.DateOffset(years=8)
+# Linear features
+col_feats = ['T3M','T6M','T9M','T12M']
+col_resp = ['F12W']
+X = df_ret_TvF.loc[row_st_dt:row_ed_dt, col_feats]
+y = df_ret_TvF.loc[row_st_dt:row_ed_dt, col_resp]
+mlr.fit(X, y);print(f'\nScore TrainSet: {mlr.score(X,y):,.2%}\n')
+pd.DataFrame([np.insert(mlr.coef_[0],0,mlr.intercept_[0])], columns = ['b']+col_feats)
+y_hat = mlr.predict(X)
+sse = np.sum((mlr.predict(X) - y) ** 2, axis=0) / float(X.shape[0] - X.shape[1])
+se = np.array([
+            np.sqrt(np.diagonal(sse[i] * np.linalg.inv(np.dot(X.T, X))))
+                                                    for i in range(sse.shape[0])
+                    ])
+mlr_tstat = mlr.coef_ / se
+mlr_tstat_p = 2 * (1 - stats.t.cdf(np.abs(mlr_tstat), y.shape[0] - X.shape[1]))
+mlr_insample = y.merge(pd.DataFrame(y_hat, columns=['Model'], index=y.index), 
+        left_index=True,right_index=True)
+mlr_insample.plot(title='In-Sample Data Returns')
+(mlr_insample.diff(axis=1).dropna(axis=1)*-1).plot(title='In-Sample Model Errors')
 
 #%% TREND
 # Annualized k-month returns
