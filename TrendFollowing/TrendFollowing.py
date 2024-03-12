@@ -7,6 +7,7 @@ Trend following investemnt strategy tool kit.
 #%% MODULES
 import numpy as np
 import pandas as pd
+import pandas_ta as ta
 from matplotlib import pyplot as plt
 import matplotlib.dates as mdates
 import os
@@ -143,21 +144,39 @@ ax.set_title(f'{yh_tkrlst[0][:2]} Future')
 plt.xticks(rotation=45)
 plt.tight_layout(); plt.show()
 
+#%% PRICE TREND INDICATOR
+# Price level ema
+data['EMA_21'] = data[['Close']].ta.ema(length=21)
+data['EMA_50'] = data[['Close']].ta.ema(length=50)
+# Plot
+fig, ax = plt.subplots()
+ax.plot(data.loc['2023-03':,'Adj Close'],'-',c='darkcyan')
+ax.plot(data.loc['2023-03':,'EMA_21'],c='C0')
+ax.plot(data.loc['2023-03':,'EMA_50'],c='orange')
+myFmt = mdates.DateFormatter('%d%b%Y')
+ax.xaxis.set_major_formatter(myFmt)
+ax.set_xlabel('')
+ax.set_ylabel('Price')
+ax.set_title(f'{yh_tkrlst[0][:2]} Future')
+plt.xticks(rotation=45)
+plt.tight_layout(); plt.show()
+
 #%% RETURNS
 # Daily log-prices
 data_logP = data[['Adj Close']].apply(np.log)
 
 # Daily returns
 data_ret = data_logP.diff().fillna(0)
-ema_alpha = 1-60/61
-data_ret['EMA'] = data_ret['Adj Close'].ewm(span=16, adjust=False).mean()
+data_ret['EMA_21'] = data_ret[['Adj Close']].rename(columns={'Adj Close':'Close'}).ta.ema(length=21)
+data_ret['EMA_50'] = data_ret[['Adj Close']].rename(columns={'Adj Close':'Close'}).ta.ema(length=50)
 
 # Cum return index
 data_idx = data_ret.cumsum().apply(np.exp)
 t1y_date = todays_date - pd.tseries.offsets.DateOffset(years=1)
-data_idx.loc['2024':].plot(color=['darkcyan','orange'], 
+clrlst = ['darkcyan','blue','orange','red']
+data_idx.loc['2024':].plot(color=clrlst, 
                            title=f'{yh_tkrlst[0][:2]} Returns Idx')
-data_idx.loc[t1y_date:].plot(color=['darkcyan','orange'], 
+data_idx.loc[t1y_date:].plot(color=clrlst, 
                              title=f'{yh_tkrlst[0][:2]} Returns Idx')
 
 # Volatility
@@ -367,7 +386,7 @@ reb_px_exit = data.loc[reb_date_end, 'Adj Close']
 reb_pnl = (reb_px_exit - reb_px_enter)*ct_pt_value*reb_pos_size
 reb_ret = (np.log(reb_px_exit) - np.log(reb_px_enter))*reb_sgnl
 
-#%% STRAT: Trend signal + rebalance period by holding time
+#%% STRAT: Trend signal + rebalance period by holding time /RETURNS
 
 # MONTHLY rebalance
 tmp = set([(d.year,d.month) for d in df_TkM_sgnls.index])
@@ -427,7 +446,7 @@ np.exp(df_strat['R'].cumsum()).plot(title='Trend: T9M Sign\nReb: Weekly+T1M')
 statistics(df_strat[['R','PnL']]).T
 df_strat['PnL'].cumsum().plot()
 
-#%% STRAT: Trend filter + Xover signal
+#%% STRAT: Trend filter + Xover signal /RETURNS
 
 # Lagged returns xovers: 1M vs 3M returns
 df_TkM_sgnls['xover'] = 0
@@ -509,6 +528,30 @@ df_strat_byXover['PnL'] = df_strat_byXover.\
 np.exp(df_strat_byXover['R'].cumsum()).plot(title='Trend: T9M Sign\nReb: 1Mxo0')
 statistics(df_strat_byXover[['R','PnL']]).T
 df_strat_byXover['PnL'].cumsum().plot()
+
+#%% STRAT: Trend filter + price xover signal /PRICE
+# Trend is determined by the relative position of the short over the long EMA
+# Signal is determined by the price xover the short EMA
+
+# data
+tmpcols = ['Close','EMA_21','EMA_50']
+df_strat = data[tmpcols].dropna()
+df_strat.insert(1,'Close_1',df_strat['Close'].shift())
+df_strat.dropna(inplace=True)
+
+# trend
+df_strat = pd.concat([df_strat, 
+           df_strat[['EMA_21','EMA_50']].\
+               apply(lambda x: (x[0] > x[1])*2-1, axis=1).\
+                   rename('Trend').to_frame()
+            ], axis=1)
+    
+# signals
+df_strat['Signal'] = 0
+df_strat['Signal'] += df_strat.apply(lambda x: (x['Close_1'] < x['EMA_21'])*(x['Close'] > x['EMA_21'])*1, axis=1)
+df_strat['Signal'] += df_strat.apply(lambda x: (x['Close_1'] > x['EMA_21'])*(x['Close'] < x['EMA_21'])*1*-1, axis=1)
+
+
 
 #%% DISTRIBUTION ANALYSIS
 from statsmodels.distributions.empirical_distribution import ECDF
