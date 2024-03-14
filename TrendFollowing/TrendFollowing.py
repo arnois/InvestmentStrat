@@ -96,10 +96,11 @@ def plot_corrmatrix(df, dt_start = None, dt_end = None, lst_securities = None,
 str_idt, str_fdt = '2000-12-31', '2023-12-31'
 
 # Futures symbols
-yh_tkrlst = ['ZT=F'] # ZT=F, ZF=F
+yh_tkrlst = ['ZT=F'] # ZT=F, ZF=F, ZN=F, TN=F
 
 # Data pull
-path = r'C:\Users\arnoi\Documents\Python Scripts\db\futures_'+yh_tkrlst[0][:2]+'_yf.parquet'
+path = r'C:\Users\arnoi\Documents\Python Scripts\db\futures_'+\
+        yh_tkrlst[0][:2]+'_yf.parquet'
 path = r'H:\db\futures_'+yh_tkrlst[0][:2]+'_yf.parquet'
 if os.path.isfile(path):
     # From saved db
@@ -145,14 +146,15 @@ plt.xticks(rotation=45)
 plt.tight_layout(); plt.show()
 
 #%% PRICE TREND INDICATOR
+t1y_date = todays_date - pd.tseries.offsets.DateOffset(years=1)
 # Price level ema
-data['EMA_21'] = data[['Close']].ta.ema(length=21)
-data['EMA_50'] = data[['Close']].ta.ema(length=50)
+data['EMA_ST'] = data[['Close']].ta.ema(length=21)
+data['EMA_LT'] = data[['Close']].ta.ema(length=50)
 # Plot
 fig, ax = plt.subplots()
-ax.plot(data.loc['2023-03':,'Adj Close'],'-',c='darkcyan')
-ax.plot(data.loc['2023-03':,'EMA_21'],c='C0')
-ax.plot(data.loc['2023-03':,'EMA_50'],c='orange')
+ax.plot(data.loc[t1y_date:,'Adj Close'],'-',c='darkcyan')
+ax.plot(data.loc[t1y_date:,'EMA_ST'],c='C0')
+ax.plot(data.loc[t1y_date:,'EMA_LT'],c='orange')
 myFmt = mdates.DateFormatter('%d%b%Y')
 ax.xaxis.set_major_formatter(myFmt)
 ax.set_xlabel('')
@@ -167,15 +169,14 @@ data_logP = data[['Adj Close']].apply(np.log)
 
 # Daily returns
 data_ret = data_logP.diff().fillna(0)
-data_ret['EMA_21'] = data_ret[['Adj Close']].rename(columns={'Adj Close':'Close'}).ta.ema(length=21)
-data_ret['EMA_50'] = data_ret[['Adj Close']].rename(columns={'Adj Close':'Close'}).ta.ema(length=50)
+data_ret['EMA_ST'] = data_ret[['Adj Close']].\
+    rename(columns={'Adj Close':'Close'}).ta.ema(length=21)
+data_ret['EMA_LT'] = data_ret[['Adj Close']].\
+    rename(columns={'Adj Close':'Close'}).ta.ema(length=50)
 
 # Cum return index
 data_idx = data_ret.cumsum().apply(np.exp)
-t1y_date = todays_date - pd.tseries.offsets.DateOffset(years=1)
 clrlst = ['darkcyan','blue','orange','red']
-data_idx.loc['2024':].plot(color=clrlst, 
-                           title=f'{yh_tkrlst[0][:2]} Returns Idx')
 data_idx.loc[t1y_date:].plot(color=clrlst, 
                              title=f'{yh_tkrlst[0][:2]} Returns Idx')
 
@@ -188,7 +189,8 @@ data_ret_sigma = (data_ret[['Adj Close']].\
                                                          left_index=True,
                                                          right_index=True)
 statistics(data_ret_sigma).T
-data_ret_sigma.loc['2023-02-21':].plot(title=f'{yh_tkrlst[0][:2]} Volatility', alpha=0.65)
+data_ret_sigma.loc[t1y_date:].\
+    plot(title=f'{yh_tkrlst[0][:2]} Volatility', alpha=0.65)
 
 #%% VOLATILITY
 # Function to compute daily ex ante variance estimate
@@ -212,7 +214,7 @@ def exante_var_estimate(t: pd.Timestamp = pd.Timestamp("2024-02-07"),
     if idx_t<=0:
         idx_t = 1
     # Exp. weighted average return
-    var_rt = data_ret['EMA'].iloc[idx_t]
+    var_rt = data_ret.iloc[:,1].iloc[idx_t]
     # EWASR
     sumvar = 0
     for n in range(idx_t-1):
@@ -533,23 +535,48 @@ df_strat_byXover['PnL'].cumsum().plot()
 # Trend is determined by the relative position of the short over the long EMA
 # Signal is determined by the price xover the short EMA
 
-# data
-tmpcols = ['Close','EMA_21','EMA_50']
+# Base data for strat
+tmpcols = ['Close','EMA_ST','EMA_LT']
 df_strat = data[tmpcols].dropna()
 df_strat.insert(1,'Close_1',df_strat['Close'].shift())
 df_strat.dropna(inplace=True)
 
-# trend
+# Trend signal
 df_strat = pd.concat([df_strat, 
-           df_strat[['EMA_21','EMA_50']].\
+           df_strat[['EMA_ST','EMA_LT']].\
                apply(lambda x: (x[0] > x[1])*2-1, axis=1).\
                    rename('Trend').to_frame()
             ], axis=1)
     
-# signals
+# Entry signals
 df_strat['Signal'] = 0
-df_strat['Signal'] += df_strat.apply(lambda x: (x['Close_1'] < x['EMA_21'])*(x['Close'] > x['EMA_21'])*1, axis=1)
-df_strat['Signal'] += df_strat.apply(lambda x: (x['Close_1'] > x['EMA_21'])*(x['Close'] < x['EMA_21'])*1*-1, axis=1)
+df_strat['Signal'] += df_strat.\
+    apply(lambda x: (x['Close_1'] < x['EMA_ST'])*(x['Close'] > x['EMA_ST'])*1, 
+          axis=1)
+df_strat['Signal'] += df_strat.\
+    apply(lambda x: (x['Close_1'] > x['EMA_ST'])*(x['Close'] < x['EMA_ST'])*-1, 
+          axis=1)
+    
+# Exit long pos
+df_strat['Exit_Long'] = df_strat.\
+    apply(lambda x: (x['Close_1'] > x['EMA_LT'])*(x['Close'] < x['EMA_LT']), 
+          axis=1)
+
+# Exit short pos
+df_strat['Exit_Short'] = df_strat.\
+    apply(lambda x: (x['Close_1'] < x['EMA_LT'])*(x['Close'] > x['EMA_LT']), 
+          axis=1)
+
+# Valid entries
+df_valid_entry = ((df_strat['Trend']*df_strat['Signal'] > 0)*df_strat['Signal']).\
+    rename('Signal').to_frame()
+df_valid_entry = df_valid_entry[df_valid_entry['Signal'] != 0]
+
+df_valid_entry[df_valid_entry['Exit_Long'] != 0]
+
+# Backtest run
+df_strat_bt = pd.DataFrame()
+for i,r in df_strat_bt
 
 
 
