@@ -572,11 +572,81 @@ df_valid_entry = ((df_strat['Trend']*df_strat['Signal'] > 0)*df_strat['Signal'])
     rename('Signal').to_frame()
 df_valid_entry = df_valid_entry[df_valid_entry['Signal'] != 0]
 
-df_valid_entry[df_valid_entry['Exit_Long'] != 0]
+df_valid_entry[df_strat[['Exit_Long']] != 0].index
 
+###############################################################################
 # Backtest run
-df_strat_bt = pd.DataFrame()
-for i,r in df_strat_bt
+bt_cols = ['Start','End','Signal','Entry_price','Exit_price', 'PnL',
+           'Dur_days', 'MaxGain(MFE)', 'MaxLoss(MAE)', 'M2M_Mean', 'M2M_TMean',
+           'M2M_IQR', 'M2M_Std', 'M2M_Skew', 'M2M_Med', 'M2M_Kurt']
+df_strat_bt = pd.DataFrame(columns = bt_cols)
+for i,r in df_valid_entry.iterrows():
+    # Check if signal is from today
+    if df_strat[i:].shape[0] < 1:
+        # We actually are seeing this singal live. Trade at tomorrows open.
+        break
+    
+    # Trade signal triggers a trade at next day
+    entry_day = df_strat[i:].iloc[1].name
+    
+    # Entry price at OHL mean price to account for price action
+    entry_price = data.loc[entry_day, ['Open', 'High', 'Low']].mean()
+    
+    # Trade is closed at next day when exit signal is triggered
+    if r['Signal'] == 1: # Open position is long
+        # Filter data by possible exits from a long position
+        dates_valid_exit = df_strat.index[df_strat['Exit_Long'] != 0]
+        col_maxProfit = 'High'
+        col_maxLoss = 'Low'
+    else: # Open position is short
+        # Filter out by short-only exit signals
+        dates_valid_exit = df_strat.index[df_strat['Exit_Short'] != 0]
+        col_maxProfit = 'Low'
+        col_maxLoss = 'High'
+    
+    # Valid exits 
+    tmpdf_valid_exit = data.loc[dates_valid_exit].loc[i:]
+        
+    # Check if trade still open
+    if tmpdf_valid_exit.shape[0] < 2:
+        # Trade is still on, so possible exit price is on last observed day
+        exit_day = tmpdf_valid_exit.iloc[-1].name
+    else: # Exit signal triggered
+        # Exit signal date
+        date_exit_signal = tmpdf_valid_exit.iloc[0].name
+        
+        # Check if closing trade is tomorrow
+        if data.loc[date_exit_signal:].shape[0] < 2:
+            exit_day = data.loc[date_exit_signal:].iloc[0].name + \
+                pd.tseries.offsets.BDay(1)
+        else: 
+            # Exit day following exit signal date
+            exit_day = data.loc[date_exit_signal:].iloc[1].name
+        
+    # Exit price at OHL mean price to account for price action
+    exit_price = data.loc[exit_day][['Open', 'High', 'Low']].mean()
+    
+    # Trade PnL
+    pnl = (exit_price - entry_price)*r['Signal']
+    
+    # Trade duration
+    dur_days = (exit_day - entry_day).days
+    
+    # Mark2Market PnL
+    m2m_ = (data.loc[entry_day:exit_day, 'Close'] - entry_price)
+    
+    # Mark-2-market stats
+    m2m_stats = statistics(m2m_.to_frame())
+    mfe = (max(data.loc[entry_day:exit_day, col_maxProfit]) - \
+        entry_price)*r['Signal']
+    mae = (min(data.loc[entry_day:exit_day, col_maxLoss]) - \
+        entry_price)*r['Signal']
+
+    # BT row data
+    tmp_bt_row = [entry_day, exit_day, r['Signal'], entry_price, exit_price, 
+                  pnl, dur_days, mfe, mae]+m2m_stats.to_numpy().tolist()[0]
+    # Add obs to bt df
+    df_strat_bt.loc[i] = tmp_bt_row
 
 
 
