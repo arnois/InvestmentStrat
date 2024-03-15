@@ -572,15 +572,17 @@ df_valid_entry = ((df_strat['Trend']*df_strat['Signal'] > 0)*df_strat['Signal'])
     rename('Signal').to_frame()
 df_valid_entry = df_valid_entry[df_valid_entry['Signal'] != 0]
 
-df_valid_entry[df_strat[['Exit_Long']] != 0].index
-
 ###############################################################################
 # Backtest run
 bt_cols = ['Start','End','Signal','Entry_price','Exit_price', 'PnL',
            'Dur_days', 'MaxGain(MFE)', 'MaxLoss(MAE)', 'M2M_Mean', 'M2M_TMean',
            'M2M_IQR', 'M2M_Std', 'M2M_Skew', 'M2M_Med', 'M2M_Kurt']
 df_strat_bt = pd.DataFrame(columns = bt_cols)
+last_exit_day = df_valid_entry.index[0]
 for i,r in df_valid_entry.iterrows():
+    # Valid entry day should be after last trade exit date
+    if i < last_exit_day:
+        continue
     # Check if signal is from today
     if df_strat[i:].shape[0] < 1:
         # We actually are seeing this singal live. Trade at tomorrows open.
@@ -606,11 +608,11 @@ for i,r in df_valid_entry.iterrows():
     
     # Valid exits 
     tmpdf_valid_exit = data.loc[dates_valid_exit].loc[i:]
-        
+
     # Check if trade still open
     if tmpdf_valid_exit.shape[0] < 2:
         # Trade is still on, so possible exit price is on last observed day
-        exit_day = tmpdf_valid_exit.iloc[-1].name
+        exit_day = data.iloc[-1].name
     else: # Exit signal triggered
         # Exit signal date
         date_exit_signal = tmpdf_valid_exit.iloc[0].name
@@ -633,7 +635,7 @@ for i,r in df_valid_entry.iterrows():
     dur_days = (exit_day - entry_day).days
     
     # Mark2Market PnL
-    m2m_ = (data.loc[entry_day:exit_day, 'Close'] - entry_price)
+    m2m_ = (data.loc[entry_day:exit_day, 'Close'] - entry_price)*r['Signal']
     
     # Mark-2-market stats
     m2m_stats = statistics(m2m_.to_frame())
@@ -647,7 +649,9 @@ for i,r in df_valid_entry.iterrows():
                   pnl, dur_days, mfe, mae]+m2m_stats.to_numpy().tolist()[0]
     # Add obs to bt df
     df_strat_bt.loc[i] = tmp_bt_row
-
+    
+    # Update last exit day
+    last_exit_day = exit_day
 
 
 #%% DISTRIBUTION ANALYSIS
