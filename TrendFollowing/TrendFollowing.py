@@ -88,8 +88,74 @@ def plot_corrmatrix(df, dt_start = None, dt_end = None, lst_securities = None,
     plt.title(corrM.title(), size=20)
     plt.tight_layout();plt.show()
     return None
+#%% DATA FROM BBG
+# Savepath
+path = r'C:\Users\arnoi\Documents\Python Scripts\db\eqty_bbg.parquet'
+path = r'H:\db\eqty_bbg.parquet'
 
-#%% DATA
+# Data pull
+if os.path.isfile(path):
+    # From saved db
+    data = pd.read_parquet(path)
+else:
+    # Inception from xl file
+    xlpath = r'C:\Users\jquintero\db\datapull_eqty_1D.xlsx'
+    data = pd.read_excel(xlpath)
+    tmpcols = data.iloc[4]; tmpcols[0] = 'Date'; tmpcols = tmpcols.tolist()
+    tmpdf = data.iloc[7:]; tmpdf.columns = tmpcols
+    tmpdf = tmpdf.set_index('Date').astype(float)
+    # Save db
+    tmpdf.to_parquet(path)
+    data = tmpdf
+    
+#%% TREND ANALYSIS
+data_ta = pd.DataFrame()
+nes = 21
+nel = 64
+for name in data.columns:
+    # Short EMA
+    ssen = f'{name}_EMA_{nes}'
+    tmp_sema = data[name].rename('Close').to_frame().ta.ema(nes).rename(ssen)
+    
+    # Long EMA
+    slen = f'{name}_EMA_{nel}'
+    tmp_lema = data[name].rename('Close').to_frame().ta.ema(nel).rename(slen)
+    
+    # Trend strength
+    tmp_emadiff = (tmp_sema - tmp_lema)
+    tmp_strength = pd.Series('normal',index=tmp_emadiff.index)
+    tmp_strength[abs(tmp_emadiff) >= tmp_emadiff.std()] = 'strong'
+    tmp_strength[tmp_emadiff <= tmp_emadiff.std()/2] = 'weak'
+    
+    # Trend status; 5-EMA of the RoC of the EMA difference
+    tmp_status = tmp_emadiff.diff().rename('Close').to_frame().ta.ema(5)
+    
+    # Trend
+    data_ta[f'{name}_trend'] = tmp_emadiff.apply(np.sign)
+    data_ta[f'{name}_trend_strength'] = tmp_strength
+    data_ta[f'{name}_trend_status'] = tmp_status
+    
+# Check any assets TA
+name = 'BTC'
+namecol = [f'{name}_trend',f'{name}_trend_strength',f'{name}_trend_status']
+data_ta[namecol].iloc[-21:].merge(
+    data.loc[data_ta[namecol].iloc[-21:].index][name]
+    , left_index=True, right_index=True)
+
+# Filter out non-weak trends
+nonwTrends = []
+for name in data.columns:
+    # Trend strength
+    tmpcol = f'{name}_trend_strength'
+    if data_ta.iloc[-1][f'{name}_trend_strength'] == 'weak':
+        continue
+    else:
+        nonwTrends.append(name)
+
+# Non-weak Trending Assets
+data_ta.iloc[-1][[f'{c}_trend' for c in nonwTrends]]
+
+#%% DATA FROM YFINANCE
 # for demo purposes we are using ZN (10Y T-Note) futures contract
 
 # Dates range
