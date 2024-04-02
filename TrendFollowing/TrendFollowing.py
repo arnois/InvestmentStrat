@@ -88,9 +88,9 @@ def plot_corrmatrix(df, dt_start = None, dt_end = None, lst_securities = None,
     plt.title(corrM.title(), size=20)
     plt.tight_layout();plt.show()
     return None
-#%% DATA FROM BBG
+#%% DATA FROM XL FILE (BBG)
 # Savepath
-path = r'C:\Users\arnoi\Documents\Python Scripts\db\eqty_bbg.parquet'
+path = r'C:\Users\arnoi\Documents\db\eqty_bbg.parquet'
 path = r'H:\db\eqty_bbg.parquet'
 
 # Data pull
@@ -107,6 +107,29 @@ else:
     # Save db
     tmpdf.to_parquet(path)
     data = tmpdf
+    
+# Data update
+last_date_data = data.index[-1]
+todays_date = pd.Timestamp(dt.datetime.today().date()) - pd.tseries.offsets.\
+    BDay(1)
+isDataOOD = last_date_data < todays_date
+if isDataOOD:
+    print("Updating data... ")
+    # date range for new data
+    str_idt = last_date_data.strftime("%Y-%m-%d")
+    str_fdt = todays_date.strftime("%Y-%m-%d")
+    # new data
+    xlpath_update = r'C:\Users\jquintero\db\datapull_eqty_1D.xlsx'
+    new_data = pd.read_excel(xlpath_update)
+    tmpcols = new_data.iloc[4]; tmpcols[0] = 'Date'; tmpcols = tmpcols.tolist()
+    tmpdf = new_data.iloc[7:]; tmpdf.columns = tmpcols
+    tmpdf = tmpdf.set_index('Date').astype(float)
+    # updated data
+    updated_data = pd.concat([data, tmpdf.loc[str_idt:str_fdt]]).\
+        reset_index().drop_duplicates('Date').set_index('Date')
+    print("Saving data...")
+    updated_data.to_parquet(path)
+    data = pd.read_parquet(path)
     
 #%% TREND ANALYSIS
 data_ta = pd.DataFrame()
@@ -136,7 +159,7 @@ for name in data.columns:
     data_ta[f'{name}_trend_status'] = tmp_status
     
 # Check any assets TA
-name = 'BTC'
+name = 'IWM'
 namecol = [f'{name}_trend',f'{name}_trend_strength',f'{name}_trend_status']
 data_ta[namecol].iloc[-21:].merge(
     data.loc[data_ta[namecol].iloc[-21:].index][name]
@@ -601,37 +624,52 @@ df_strat_byXover['PnL'].cumsum().plot()
 # Trend is determined by the relative position of the short over the long EMA
 # Signal is determined by the price xover the short EMA
 
+# Smoothed data
+data_ema = data.\
+    apply(lambda s: ta.ema(s, nes)).\
+    rename(columns=dict(zip(data.columns,
+                            [f'{s}_EMA_ST' for s in data.columns]))).merge(
+    data.\
+        apply(lambda s: ta.ema(s, nel)).\
+        rename(columns=dict(zip(data.columns,
+                                [f'{s}_EMA_LT' for s in data.columns]))),                      
+    left_index=True, right_index=True)
+
 # Base data for strat
-tmpcols = ['Close','EMA_ST','EMA_LT']
-df_strat = data[tmpcols].dropna()
-df_strat.insert(1,'Close_1',df_strat['Close'].shift())
-df_strat.dropna(inplace=True)
+name = 'IWM'
+tmpcols = [f'{name}_EMA_{s}' for s in ['ST','LT']]
+df_strat = data_ema[tmpcols].dropna()
+# Temporal price+indicator info
+df_tmp = data[[name]].merge(
+    data[[name]].shift().rename(columns={name:f'{name}_1'}), 
+    left_index=True, right_index=True).\
+    merge(data_ema[tmpcols], left_index=True, right_index=True)
 
-# Trend signal
-df_strat = pd.concat([df_strat, 
-           df_strat[['EMA_ST','EMA_LT']].\
-               apply(lambda x: (x[0] > x[1])*2-1, axis=1).\
-                   rename('Trend').to_frame()
-            ], axis=1)
-    
 # Entry signals
-df_strat['Signal'] = 0
-df_strat['Signal'] += df_strat.\
-    apply(lambda x: (x['Close_1'] < x['EMA_ST'])*(x['Close'] > x['EMA_ST'])*1, 
-          axis=1)
-df_strat['Signal'] += df_strat.\
-    apply(lambda x: (x['Close_1'] > x['EMA_ST'])*(x['Close'] < x['EMA_ST'])*-1, 
-          axis=1)
-    
-# Exit long pos
-df_strat['Exit_Long'] = df_strat.\
-    apply(lambda x: (x['Close_1'] > x['EMA_LT'])*(x['Close'] < x['EMA_LT']), 
-          axis=1)
+df_signals = pd.DataFrame(index = df_tmp.index)
+df_signals['Trend'] = 0
+df_signals['Entry'] = 0
+df_signals['Exit_Long'] = 0
+df_signals['Exit_Short'] = 0
 
-# Exit short pos
-df_strat['Exit_Short'] = df_strat.\
-    apply(lambda x: (x['Close_1'] < x['EMA_LT'])*(x['Close'] > x['EMA_LT']), 
-          axis=1)
+# Trend signals
+df_signals['Trend'] += data_ta[f'{name}_trend'].fillna(0).astype(int)
+    
+# Buy signals
+df_signals['Entry'] += df_tmp.apply(lambda s: 
+    (s[name+'_1'] < s[name+'_EMA_ST'])*(s[name] > s[name+'_EMA_ST'])*1, axis=1)
+
+# Sell signals
+df_signals['Entry'] += df_tmp.apply(lambda s: 
+    (s[name+'_1'] > s[name+'_EMA_ST'])*(s[name] < s[name+'_EMA_ST'])*-1, axis=1)
+    
+# Exit longs
+df_signals['Exit_Long'] += df_tmp.apply(lambda x: 
+    (x[name+'_1'] > x[name+'_EMA_LT'])*(x[name] < x[name+'_EMA_LT'])*1, axis=1)
+
+# Exit shorts
+df_signals['Exit_Short'] += df_tmp.apply(lambda x: 
+    (x[name+'_1'] < x[name+'_EMA_LT'])*(x[name] > x[name+'_EMA_LT']), axis=1)
 
 # Valid entries
 df_valid_entry = ((df_strat['Trend']*df_strat['Signal'] > 0)*df_strat['Signal']).\
