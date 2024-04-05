@@ -132,17 +132,28 @@ if isDataOOD:
     data = pd.read_parquet(path)
     
 #%% TREND ANALYSIS
-data_ta = pd.DataFrame()
 nes = 21
 nel = 64
+
+# Smoothed data
+data_ema = data.\
+    apply(lambda s: ta.ema(s, nes)).\
+    rename(columns=dict(zip(data.columns,
+                            [f'{s}_EMA_ST' for s in data.columns]))).merge(
+    data.\
+        apply(lambda s: ta.ema(s, nel)).\
+        rename(columns=dict(zip(data.columns,
+                                [f'{s}_EMA_LT' for s in data.columns]))),                      
+    left_index=True, right_index=True)
+
+# Trend + dynamics
+data_ta = pd.DataFrame()
 for name in data.columns:
     # Short EMA
-    ssen = f'{name}_EMA_{nes}'
-    tmp_sema = data[name].rename('Close').to_frame().ta.ema(nes).rename(ssen)
+    tmp_sema = data_ema[f'{name}_EMA_ST']
     
     # Long EMA
-    slen = f'{name}_EMA_{nel}'
-    tmp_lema = data[name].rename('Close').to_frame().ta.ema(nel).rename(slen)
+    tmp_lema = data_ema[f'{name}_EMA_LT']
     
     # Trend strength
     tmp_emadiff = (tmp_sema - tmp_lema)
@@ -153,10 +164,14 @@ for name in data.columns:
     # Trend status; 5-EMA of the RoC of the EMA difference
     tmp_status = tmp_emadiff.diff().rename('Close').to_frame().ta.ema(5)
     
-    # Trend
-    data_ta[f'{name}_trend'] = tmp_emadiff.apply(np.sign)
-    data_ta[f'{name}_trend_strength'] = tmp_strength
-    data_ta[f'{name}_trend_status'] = tmp_status
+    # Trend specs
+    data_ta = pd.\
+        concat([data_ta, 
+                tmp_emadiff.apply(np.sign).rename(f'{name}_trend').to_frame(),
+                tmp_strength.rename(f'{name}_trend_strength').to_frame(),
+                tmp_status.rename(f'{name}_trend_status').to_frame(),
+                tmp_emadiff.rename(f'{name}_ema_d').to_frame()], 
+               axis=1)    
     
 # Check any assets TA
 name = 'IWM'
@@ -164,6 +179,36 @@ namecol = [f'{name}_trend',f'{name}_trend_strength',f'{name}_trend_status']
 data_ta[namecol].iloc[-21:].merge(
     data.loc[data_ta[namecol].iloc[-21:].index][name]
     , left_index=True, right_index=True)
+
+# Assets trend stengthness by ST-LT EMA Differences
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
+sc = StandardScaler()
+mms = MinMaxScaler()
+
+# Trend strength - as a smoothed short-long EMA difference
+X_strength = data_ta.loc['2019':,[f'{s}_ema_d' for s in data.columns]]
+
+# Z-scaled strength
+data_strength_Z = pd.DataFrame(sc.fit_transform(X_strength), 
+             columns = data.columns, index=X_strength.index)
+
+# MinMax-scaled strength
+data_strength_mM = pd.DataFrame(mms.fit_transform(X_strength), 
+             columns = data.columns, index=X_strength.index)
+
+# Comparison between scalers
+pd.concat([data_strength_Z.iloc[-1], 
+           data_strength_mM.iloc[-1]], axis=1)
+
+# Strength-based weights
+from sklearn.preprocessing import Normalizer
+nrmlzr = Normalizer()
+data_w_Z = pd.DataFrame(nrmlzr.fit_transform(data_strength_Z),
+                        columns = data.columns, index = X_strength.index)
+data_w_mM = pd.DataFrame(nrmlzr.fit_transform(data_strength_mM),
+                        columns = data.columns, index = X_strength.index)
+# Compare
+pd.concat([data_w_Z.iloc[-1], data_w_mM.iloc[-1]], axis=1)**2
 
 # Filter out non-weak trends
 nonwTrends = []
