@@ -175,40 +175,29 @@ for name in data.columns:
     
 # Check any assets TA
 name = 'IWM'
-namecol = [f'{name}_trend',f'{name}_trend_strength',f'{name}_trend_status']
+namecol = [f'{name}_trend',f'{name}_trend_strength',
+           f'{name}_trend_status',f'{name}_ema_d']
 data_ta[namecol].iloc[-21:].merge(
     data.loc[data_ta[namecol].iloc[-21:].index][name]
     , left_index=True, right_index=True)
 
 # Assets trend stengthness by ST-LT EMA Differences
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from sklearn.preprocessing import StandardScaler
 sc = StandardScaler()
-mms = MinMaxScaler()
 
 # Trend strength - as a smoothed short-long EMA difference
-X_strength = data_ta.loc['2019':,[f'{s}_ema_d' for s in data.columns]]
+X_strength = data_ta.loc['2004-03-29':,[f'{s}_ema_d' for s in data.columns]]
 
 # Z-scaled strength
 data_strength_Z = pd.DataFrame(sc.fit_transform(X_strength), 
-             columns = data.columns, index=X_strength.index)
-
-# MinMax-scaled strength
-data_strength_mM = pd.DataFrame(mms.fit_transform(X_strength), 
-             columns = data.columns, index=X_strength.index)
-
-# Comparison between scalers
-pd.concat([data_strength_Z.iloc[-1], 
-           data_strength_mM.iloc[-1]], axis=1)
+             columns = data.columns, index=X_strength.index).fillna(0).abs()
 
 # Strength-based weights
-from sklearn.preprocessing import Normalizer
-nrmlzr = Normalizer()
-data_w_Z = pd.DataFrame(nrmlzr.fit_transform(data_strength_Z),
-                        columns = data.columns, index = X_strength.index)
-data_w_mM = pd.DataFrame(nrmlzr.fit_transform(data_strength_mM),
-                        columns = data.columns, index = X_strength.index)
-# Compare
-pd.concat([data_w_Z.iloc[-1], data_w_mM.iloc[-1]], axis=1)**2
+data_w = data_strength_Z.apply(lambda x: x/x.sum(), axis=1)
+
+# Weights evolution
+data_w.loc['2004-04-01':'2004-06-30'].\
+    plot.area().legend({}, loc='center left', bbox_to_anchor=(1,0.5))
 
 # Filter out non-weak trends
 nonwTrends = []
@@ -669,21 +658,11 @@ df_strat_byXover['PnL'].cumsum().plot()
 # Trend is determined by the relative position of the short over the long EMA
 # Signal is determined by the price xover the short EMA
 
-# Smoothed data
-data_ema = data.\
-    apply(lambda s: ta.ema(s, nes)).\
-    rename(columns=dict(zip(data.columns,
-                            [f'{s}_EMA_ST' for s in data.columns]))).merge(
-    data.\
-        apply(lambda s: ta.ema(s, nel)).\
-        rename(columns=dict(zip(data.columns,
-                                [f'{s}_EMA_LT' for s in data.columns]))),                      
-    left_index=True, right_index=True)
-
 # Base data for strat
 name = 'IWM'
 tmpcols = [f'{name}_EMA_{s}' for s in ['ST','LT']]
-df_strat = data_ema[tmpcols].dropna()
+df_strat = data_ema[tmpcols]
+
 # Temporal price+indicator info
 df_tmp = data[[name]].merge(
     data[[name]].shift().rename(columns={name:f'{name}_1'}), 
@@ -717,9 +696,9 @@ df_signals['Exit_Short'] += df_tmp.apply(lambda x:
     (x[name+'_1'] < x[name+'_EMA_LT'])*(x[name] > x[name+'_EMA_LT']), axis=1)
 
 # Valid entries
-df_valid_entry = ((df_strat['Trend']*df_strat['Signal'] > 0)*df_strat['Signal']).\
-    rename('Signal').to_frame()
-df_valid_entry = df_valid_entry[df_valid_entry['Signal'] != 0]
+df_valid_entry = ((df_signals['Trend']*df_signals['Entry'] > 0)*df_signals['Entry']).\
+    rename('Entry').to_frame()
+df_valid_entry = df_valid_entry[df_valid_entry['Entry'] != 0]
 
 ###############################################################################
 # Backtest run
