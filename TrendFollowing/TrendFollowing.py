@@ -195,10 +195,6 @@ data_strength_Z = pd.DataFrame(sc.fit_transform(X_strength),
 # Strength-based weights
 data_w = data_strength_Z.apply(lambda x: x/x.sum(), axis=1)
 
-# Weights evolution
-data_w.loc['2004-04-01':'2004-06-30'].\
-    plot.area().legend({}, loc='center left', bbox_to_anchor=(1,0.5))
-
 # Filter out non-weak trends
 nonwTrends = []
 for name in data.columns:
@@ -213,18 +209,23 @@ for name in data.columns:
 data_ta.iloc[-1][[f'{c}_trend' for c in nonwTrends]]
 
 #%% DATA FROM YFINANCE
+# Ticker list
+path_tkr_list = r'C:\Users\arnoi\Documents\Python Scripts\TrendFollowing'
+fname_tkr_list = r'\tickers_etf_yf.txt'
+yh_tkrlst = pd.read_csv(path_tkr_list+fname_tkr_list, 
+                        sep=",", header=None).to_numpy()[0].tolist()
+
 # for demo purposes we are using ZN (10Y T-Note) futures contract
 
 # Dates range
-str_idt, str_fdt = '2000-12-31', '2023-12-31'
+str_idt, str_fdt = '2000-12-31', '2024-04-06'
 
 # Futures symbols
-yh_tkrlst = ['ZT=F'] # ZT=F, ZF=F, ZN=F, TN=F
+#yh_tkrlst = ['ZT=F'] # ZT=F, ZF=F, ZN=F, TN=F
 
 # Data pull
-path = r'C:\Users\arnoi\Documents\Python Scripts\db\futures_'+\
-        yh_tkrlst[0][:2]+'_yf.parquet'
-path = r'H:\db\futures_'+yh_tkrlst[0][:2]+'_yf.parquet'
+path = r'C:\Users\arnoi\Documents\db\etf_yf.parquet'
+path = r'H:\db\etf_yf.parquet'
 if os.path.isfile(path):
     # From saved db
     data = pd.read_parquet(path)
@@ -235,6 +236,9 @@ else:
                               end=str_fdt)
     # Save db
     data.to_parquet(path)
+
+# Data columns mgmt
+data.rename(columns={'BTC-USD':'BTC'}, level=1, inplace=True)
 
 # Data update
 last_date_data = data.index[-1]
@@ -257,32 +261,50 @@ if isDataOOD:
     data = pd.read_parquet(path)
 
 #%% PRICE VIZ
-## Plotting T3Y Price
+## Plotting Price Levels
 fig, ax = plt.subplots()
-ax.plot(data.loc['2024':,'Adj Close'], '-', color='darkcyan')
+tmpetf = ['GLD','XLY','XLI','XLV']
+tmptkrs = [('Adj Close', s) for s in tmpetf]
+ax.plot(data.loc['2024':,tmptkrs].dropna(), '-')
 myFmt = mdates.DateFormatter('%d%b')
 ax.xaxis.set_major_formatter(myFmt)
 ax.set_xlabel('')
 ax.set_ylabel('Price')
-ax.set_title(f'{yh_tkrlst[0][:2]} Future')
+ax.set_title('ETFs')
+ax.legend(tmpetf, loc='best', bbox_to_anchor=(1.01,1.01))
 plt.xticks(rotation=45)
 plt.tight_layout(); plt.show()
 
 #%% PRICE TREND INDICATOR
-t1y_date = todays_date - pd.tseries.offsets.DateOffset(years=1)
-# Price level ema
-data['EMA_ST'] = data[['Close']].ta.ema(length=21)
-data['EMA_LT'] = data[['Close']].ta.ema(length=50)
+nes = 21
+nel = 64
+
+# Smoothed data over closing prices
+data_ema = data['Adj Close'].dropna().\
+    apply(lambda s: ta.ema(s, nes)).\
+    rename(columns=dict(zip(data['Adj Close'].columns,
+                            [f'{s}_EMA_ST' for s in data['Adj Close'].columns]))).merge(
+    data['Adj Close'].dropna().\
+        apply(lambda s: ta.ema(s, nel)).\
+        rename(columns=dict(zip(data['Adj Close'].columns,
+                                [f'{s}_EMA_LT' for s in data['Adj Close'].columns]))),                      
+    left_index=True, right_index=True)
+                                    
 # Plot
+tmpetf = 'GLD'
+tmptkr = ('Adj Close', tmpetf)
+t1y_date = todays_date - pd.tseries.offsets.DateOffset(years=1)
 fig, ax = plt.subplots()
-ax.plot(data.loc[t1y_date:,'Adj Close'],'-',c='darkcyan')
-ax.plot(data.loc[t1y_date:,'EMA_ST'],c='C0')
-ax.plot(data.loc[t1y_date:,'EMA_LT'],c='orange')
+ax.plot(data.loc[t1y_date:,tmptkr].dropna(),c='darkcyan')
+ax.plot(data_ema.loc[t1y_date:,tmpetf+'_EMA_ST'],'--', c='C0')
+ax.plot(data_ema.loc[t1y_date:,tmpetf+'_EMA_LT'],'--',c='orange')
 myFmt = mdates.DateFormatter('%d%b%Y')
 ax.xaxis.set_major_formatter(myFmt)
 ax.set_xlabel('')
 ax.set_ylabel('Price')
-ax.set_title(f'{yh_tkrlst[0][:2]} Future')
+ax.set_title(f'{tmpetf} ETF')
+ax.legend(['Price','Short EMA', 'Long EMA'], 
+          loc='best', bbox_to_anchor=(1.01,1.01))
 plt.xticks(rotation=45)
 plt.tight_layout(); plt.show()
 
@@ -699,6 +721,8 @@ df_signals['Exit_Short'] += df_tmp.apply(lambda x:
 df_valid_entry = ((df_signals['Trend']*df_signals['Entry'] > 0)*df_signals['Entry']).\
     rename('Entry').to_frame()
 df_valid_entry = df_valid_entry[df_valid_entry['Entry'] != 0]
+
+df_tmp.loc[df_valid_entry.index[0]-pd.Timedelta(days=3):df_valid_entry.index[0]+pd.Timedelta(days=1)]
 
 ###############################################################################
 # Backtest run
