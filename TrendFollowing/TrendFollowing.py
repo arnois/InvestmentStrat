@@ -90,8 +90,8 @@ def plot_corrmatrix(df, dt_start = None, dt_end = None, lst_securities = None,
     return None
 #%% DATA FROM XL FILE (BBG)
 # Savepath
-path = r'C:\Users\arnoi\Documents\db\eqty_bbg.parquet'
-path = r'H:\db\eqty_bbg.parquet'
+path = r'C:\Users\arnoi\Documents\db\etf_bbg.parquet'
+path = r'H:\db\etf_bbg.parquet'
 
 # Data pull
 if os.path.isfile(path):
@@ -99,14 +99,34 @@ if os.path.isfile(path):
     data = pd.read_parquet(path)
 else:
     # Inception from xl file
-    xlpath = r'C:\Users\jquintero\db\datapull_eqty_1D.xlsx'
+    xlpath = r'C:\Users\jquintero\db\datapull_etf_1D.xlsx'
     data = pd.read_excel(xlpath)
-    tmpcols = data.iloc[4]; tmpcols[0] = 'Date'; tmpcols = tmpcols.tolist()
-    tmpdf = data.iloc[7:]; tmpdf.columns = tmpcols
+    tmpcols1 = data.iloc[4]; tmpcols2 = data.iloc[2]
+    tmpcols1[0] = 'Date'; tmpcols1 = tmpcols1.unique().tolist()
+    if np.nan in tmpcols1: tmpcols1.remove(np.nan)
+    tmpcols2[0] = 'Date'; tmpcols2 = tmpcols2.unique().tolist()
+    if np.nan in tmpcols2: tmpcols2.remove(np.nan)
+    if 'Date' in tmpcols1: tmpcols1.remove('Date')
+    if 'Date' in tmpcols2: tmpcols2.remove('Date')
+    tmpdf = data.iloc[5:]; tmpdf = tmpdf.rename(columns={tmpdf.columns[0]:'Date'})
     tmpdf = tmpdf.set_index('Date').astype(float)
-    # Save db
+    tmplist = []
+    for a in tmpcols2:
+        tmplist+=[(s,a) for s in tmpcols1]
+    mulidx = pd.MultiIndex.from_tuples(tmplist)
+    tmpdf.columns = mulidx
+    cols2chg_l1 = dict([(s,
+                         s.replace('PX_','').lower().capitalize().\
+                             replace('Last','Close')) 
+                        for s in tmpdf.columns.levels[0]])
+    cols2chg_l2 = dict([(s,
+                         s.replace(' US Equity','').replace(' Curncy','').\
+                             replace('XBTUSD','BTC')) 
+                        for s in tmpdf.columns.levels[1]])
+    tmpdf.rename(columns=cols2chg_l1, level=0, inplace=True)
+    tmpdf.rename(columns=cols2chg_l2, level=1, inplace=True)
     tmpdf.to_parquet(path)
-    data = tmpdf
+    
     
 # Data update
 last_date_data = data.index[-1]
@@ -148,7 +168,7 @@ data_ema = data.\
 
 # Trend + dynamics
 data_ta = pd.DataFrame()
-for name in data.columns:
+for name in data['Close'].columns:
     # Short EMA
     tmp_sema = data_ema[f'{name}_EMA_ST']
     
@@ -178,7 +198,7 @@ name = 'IWM'
 namecol = [f'{name}_trend',f'{name}_trend_strength',
            f'{name}_trend_status',f'{name}_ema_d']
 data_ta[namecol].iloc[-21:].merge(
-    data.loc[data_ta[namecol].iloc[-21:].index][name]
+    data.loc[data_ta[namecol].iloc[-21:].index]['Close'][name]
     , left_index=True, right_index=True)
 
 # Assets trend stengthness by ST-LT EMA Differences
@@ -280,19 +300,19 @@ nes = 21
 nel = 64
 
 # Smoothed data over closing prices
-data_ema = data['Adj Close'].dropna().\
+data_ema = data['Close'].\
     apply(lambda s: ta.ema(s, nes)).\
-    rename(columns=dict(zip(data['Adj Close'].columns,
-                            [f'{s}_EMA_ST' for s in data['Adj Close'].columns]))).merge(
-    data['Adj Close'].dropna().\
+    rename(columns=dict(zip(data['Close'].columns,
+                            [f'{s}_EMA_ST' for s in data['Close'].columns]))).merge(
+    data['Close'].\
         apply(lambda s: ta.ema(s, nel)).\
-        rename(columns=dict(zip(data['Adj Close'].columns,
-                                [f'{s}_EMA_LT' for s in data['Adj Close'].columns]))),                      
+        rename(columns=dict(zip(data['Close'].columns,
+                                [f'{s}_EMA_LT' for s in data['Close'].columns]))),                      
     left_index=True, right_index=True)
                                     
 # Plot
 tmpetf = 'GLD'
-tmptkr = ('Adj Close', tmpetf)
+tmptkr = ('Close', tmpetf)
 t1y_date = todays_date - pd.tseries.offsets.DateOffset(years=1)
 fig, ax = plt.subplots()
 ax.plot(data.loc[t1y_date:,tmptkr].dropna(),c='darkcyan')
@@ -686,9 +706,10 @@ tmpcols = [f'{name}_EMA_{s}' for s in ['ST','LT']]
 df_strat = data_ema[tmpcols]
 
 # Temporal price+indicator info
-df_tmp = data[[name]].merge(
-    data[[name]].shift().rename(columns={name:f'{name}_1'}), 
-    left_index=True, right_index=True).\
+df_col = ('Close',name)
+df_tmp = data[[df_col]].merge(
+    data[[df_col]].shift().rename(columns={name:f'{name}_1'}, level=1), 
+    left_index=True, right_index=True).droplevel(0, axis=1).\
     merge(data_ema[tmpcols], left_index=True, right_index=True)
 
 # Entry signals
