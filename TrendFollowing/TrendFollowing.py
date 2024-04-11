@@ -88,6 +88,7 @@ def plot_corrmatrix(df, dt_start = None, dt_end = None, lst_securities = None,
     plt.title(corrM.title(), size=20)
     plt.tight_layout();plt.show()
     return None
+
 #%% DATA FROM XL FILE (BBG)
 # Savepath
 path = r'C:\Users\arnoi\Documents\db\etf_bbg.parquet'
@@ -127,7 +128,6 @@ else:
     tmpdf.rename(columns=cols2chg_l2, level=1, inplace=True)
     tmpdf.to_parquet(path)
     
-    
 # Data update
 last_date_data = data.index[-1]
 todays_date = pd.Timestamp(dt.datetime.today().date()) - pd.tseries.offsets.\
@@ -139,13 +139,91 @@ if isDataOOD:
     str_idt = last_date_data.strftime("%Y-%m-%d")
     str_fdt = todays_date.strftime("%Y-%m-%d")
     # new data
-    xlpath_update = r'C:\Users\jquintero\db\datapull_eqty_1D.xlsx'
+    xlpath_update = r'C:\Users\jquintero\db\datapull_etf_1D.xlsx'
     new_data = pd.read_excel(xlpath_update)
-    tmpcols = new_data.iloc[4]; tmpcols[0] = 'Date'; tmpcols = tmpcols.tolist()
-    tmpdf = new_data.iloc[7:]; tmpdf.columns = tmpcols
+    
+    tmpcols1 = new_data.iloc[4]; tmpcols2 = new_data.iloc[2]
+    tmpcols1[0] = 'Date'; tmpcols1 = tmpcols1.unique().tolist()
+    if np.nan in tmpcols1: tmpcols1.remove(np.nan)
+    tmpcols2[0] = 'Date'; tmpcols2 = tmpcols2.unique().tolist()
+    if np.nan in tmpcols2: tmpcols2.remove(np.nan)
+    if 'Date' in tmpcols1: tmpcols1.remove('Date')
+    if 'Date' in tmpcols2: tmpcols2.remove('Date')
+    tmpdf = new_data.iloc[5:]; tmpdf = tmpdf.rename(columns={tmpdf.columns[0]:'Date'})
     tmpdf = tmpdf.set_index('Date').astype(float)
+    
+    tmplist = []
+    for a in tmpcols2:
+        tmplist+=[(s,a) for s in tmpcols1]
+    mulidx = pd.MultiIndex.from_tuples(tmplist)
+    tmpdf.columns = mulidx
+    
+    cols2chg_l1 = dict([(s,
+                         s.replace('PX_','').lower().capitalize().\
+                             replace('Last','Close')) 
+                        for s in tmpdf.columns.levels[0]])
+    cols2chg_l2 = dict([(s,
+                         s.replace(' US Equity','').replace(' Curncy','').\
+                             replace('XBTUSD','BTC')) 
+                        for s in tmpdf.columns.levels[1]])
+    
+    tmpdf.rename(columns=cols2chg_l1, level=0, inplace=True)
+    tmpdf.rename(columns=cols2chg_l2, level=1, inplace=True)
+        
     # updated data
     updated_data = pd.concat([data, tmpdf.loc[str_idt:str_fdt]]).\
+        reset_index().drop_duplicates(('Date','')).set_index('Date')
+    print("Saving data...")
+    updated_data.to_parquet(path)
+    data = pd.read_parquet(path)
+    
+#%% DATA FROM YFINANCE
+# Ticker list
+path_tkr_list = r'C:\Users\arnoi\Documents\Python Scripts\TrendFollowing'
+fname_tkr_list = r'\tickers_etf_yf.txt'
+yh_tkrlst = pd.read_csv(path_tkr_list+fname_tkr_list, 
+                        sep=",", header=None).to_numpy()[0].tolist()
+
+# for demo purposes we are using ZN (10Y T-Note) futures contract
+
+# Dates range
+str_idt, str_fdt = '2000-12-31', '2024-04-06'
+
+# Futures symbols
+#yh_tkrlst = ['ZT=F'] # ZT=F, ZF=F, ZN=F, TN=F
+
+# Data pull
+path = r'C:\Users\arnoi\Documents\db\etf_yf.parquet'
+path = r'H:\db\etf_yf.parquet'
+if os.path.isfile(path):
+    # From saved db
+    data = pd.read_parquet(path)
+else:
+    # Download data from yahoo finance
+    data = pdr.get_data_yahoo(yh_tkrlst, 
+                              start=str_idt, 
+                              end=str_fdt)
+    # Save db
+    data.to_parquet(path)
+
+# Data columns mgmt
+data.rename(columns={'BTC-USD':'BTC'}, level=1, inplace=True)
+
+# Data update
+last_date_data = data.index[-1]
+todays_date = pd.Timestamp(dt.datetime.today().date()) - pd.tseries.offsets.\
+    BDay(1)
+isDataOOD = last_date_data < todays_date
+if isDataOOD:
+    print("Updating data... ")
+    str_idt = last_date_data.strftime("%Y-%m-%d")
+    str_fdt = todays_date.strftime("%Y-%m-%d")
+    new_data = pdr.get_data_yahoo(yh_tkrlst, start=str_idt, end=str_fdt)
+    if new_data.index[-1] != todays_date:
+        str_fdt = (todays_date + pd.tseries.offsets.DateOffset(days=1)).\
+            strftime("%Y-%m-%d")
+        new_data = pdr.get_data_yahoo(yh_tkrlst, start=str_idt, end=str_fdt)
+    updated_data = pd.concat([data,new_data]).\
         reset_index().drop_duplicates('Date').set_index('Date')
     print("Saving data...")
     updated_data.to_parquet(path)
@@ -155,15 +233,15 @@ if isDataOOD:
 nes = 21
 nel = 64
 
-# Smoothed data
-data_ema = data.\
+# Smoothed data over closing prices
+data_ema = data['Close'].\
     apply(lambda s: ta.ema(s, nes)).\
-    rename(columns=dict(zip(data.columns,
-                            [f'{s}_EMA_ST' for s in data.columns]))).merge(
-    data.\
+    rename(columns=dict(zip(data['Close'].columns,
+                            [f'{s}_EMA_ST' for s in data['Close'].columns]))).merge(
+    data['Close'].\
         apply(lambda s: ta.ema(s, nel)).\
-        rename(columns=dict(zip(data.columns,
-                                [f'{s}_EMA_LT' for s in data.columns]))),                      
+        rename(columns=dict(zip(data['Close'].columns,
+                                [f'{s}_EMA_LT' for s in data['Close'].columns]))),                      
     left_index=True, right_index=True)
 
 # Trend + dynamics
@@ -228,63 +306,12 @@ for name in data.columns:
 # Non-weak Trending Assets
 data_ta.iloc[-1][[f'{c}_trend' for c in nonwTrends]]
 
-#%% DATA FROM YFINANCE
-# Ticker list
-path_tkr_list = r'C:\Users\arnoi\Documents\Python Scripts\TrendFollowing'
-fname_tkr_list = r'\tickers_etf_yf.txt'
-yh_tkrlst = pd.read_csv(path_tkr_list+fname_tkr_list, 
-                        sep=",", header=None).to_numpy()[0].tolist()
-
-# for demo purposes we are using ZN (10Y T-Note) futures contract
-
-# Dates range
-str_idt, str_fdt = '2000-12-31', '2024-04-06'
-
-# Futures symbols
-#yh_tkrlst = ['ZT=F'] # ZT=F, ZF=F, ZN=F, TN=F
-
-# Data pull
-path = r'C:\Users\arnoi\Documents\db\etf_yf.parquet'
-path = r'H:\db\etf_yf.parquet'
-if os.path.isfile(path):
-    # From saved db
-    data = pd.read_parquet(path)
-else:
-    # Download data from yahoo finance
-    data = pdr.get_data_yahoo(yh_tkrlst, 
-                              start=str_idt, 
-                              end=str_fdt)
-    # Save db
-    data.to_parquet(path)
-
-# Data columns mgmt
-data.rename(columns={'BTC-USD':'BTC'}, level=1, inplace=True)
-
-# Data update
-last_date_data = data.index[-1]
-todays_date = pd.Timestamp(dt.datetime.today().date()) - pd.tseries.offsets.\
-    BDay(1)
-isDataOOD = last_date_data < todays_date
-if isDataOOD:
-    print("Updating data... ")
-    str_idt = last_date_data.strftime("%Y-%m-%d")
-    str_fdt = todays_date.strftime("%Y-%m-%d")
-    new_data = pdr.get_data_yahoo(yh_tkrlst, start=str_idt, end=str_fdt)
-    if new_data.index[-1] != todays_date:
-        str_fdt = (todays_date + pd.tseries.offsets.DateOffset(days=1)).\
-            strftime("%Y-%m-%d")
-        new_data = pdr.get_data_yahoo(yh_tkrlst, start=str_idt, end=str_fdt)
-    updated_data = pd.concat([data,new_data]).\
-        reset_index().drop_duplicates('Date').set_index('Date')
-    print("Saving data...")
-    updated_data.to_parquet(path)
-    data = pd.read_parquet(path)
-
 #%% PRICE VIZ
+
 ## Plotting Price Levels
 fig, ax = plt.subplots()
 tmpetf = ['GLD','XLY','XLI','XLV']
-tmptkrs = [('Adj Close', s) for s in tmpetf]
+tmptkrs = [('Close', s) for s in tmpetf]
 ax.plot(data.loc['2024':,tmptkrs].dropna(), '-')
 myFmt = mdates.DateFormatter('%d%b')
 ax.xaxis.set_major_formatter(myFmt)
@@ -294,23 +321,8 @@ ax.set_title('ETFs')
 ax.legend(tmpetf, loc='best', bbox_to_anchor=(1.01,1.01))
 plt.xticks(rotation=45)
 plt.tight_layout(); plt.show()
-
-#%% PRICE TREND INDICATOR
-nes = 21
-nel = 64
-
-# Smoothed data over closing prices
-data_ema = data['Close'].\
-    apply(lambda s: ta.ema(s, nes)).\
-    rename(columns=dict(zip(data['Close'].columns,
-                            [f'{s}_EMA_ST' for s in data['Close'].columns]))).merge(
-    data['Close'].\
-        apply(lambda s: ta.ema(s, nel)).\
-        rename(columns=dict(zip(data['Close'].columns,
-                                [f'{s}_EMA_LT' for s in data['Close'].columns]))),                      
-    left_index=True, right_index=True)
                                     
-# Plot
+# Single Plot
 tmpetf = 'GLD'
 tmptkr = ('Close', tmpetf)
 t1y_date = todays_date - pd.tseries.offsets.DateOffset(years=1)
@@ -330,32 +342,37 @@ plt.tight_layout(); plt.show()
 
 #%% RETURNS
 # Daily log-prices
-data_logP = data[['Adj Close']].apply(np.log)
+data_logP = data[['Close']].apply(np.log)
 
-# Daily returns
-data_ret = data_logP.diff().fillna(0)
-data_ret['EMA_ST'] = data_ret[['Adj Close']].\
-    rename(columns={'Adj Close':'Close'}).ta.ema(length=21)
-data_ret['EMA_LT'] = data_ret[['Adj Close']].\
-    rename(columns={'Adj Close':'Close'}).ta.ema(length=50)
+# Daily returns + smoothed returns
+data_ret = data_logP.diff().fillna(0).droplevel(0, axis=1)
+data_ret = data_ret.merge(
+    data_ret.apply(lambda s: ta.ema(s, nes)).rename(
+        columns=dict(zip(data_ret.columns,
+                         [f'{s}_EMA_ST' for s in data_ret.columns]))).\
+        merge(data_ret.apply(lambda s: ta.ema(s, nel)).\
+            rename(
+        columns=dict(zip(data_ret.columns,
+                         [f'{s}_EMA_LT' for s in data_ret.columns]))),                      
+        left_index=True, right_index=True),
+    left_index=True, right_index=True)
 
 # Cum return index
 data_idx = data_ret.cumsum().apply(np.exp)
 clrlst = ['darkcyan','blue','orange','red']
-data_idx.loc[t1y_date:].plot(color=clrlst, 
-                             title=f'{yh_tkrlst[0][:2]} Returns Idx')
+tmpNames = ['XLV','IWM','GLD','EEM']
+data_idx.loc[t1y_date:, tmpNames].plot(color=clrlst, title='Returns Idx')
 
 # Volatility
-data_ret_sigma = (data_ret[['Adj Close']].\
+data_ret_sigma = (data_ret[tmpNames].\
                   rolling(21).std()*np.sqrt(252)).dropna()
-data_ret_sigma = (data_ret[['Adj Close']].\
+data_ret_sigma = (data_ret[tmpNames].\
                   ewm(span=252, adjust=False).std()*np.sqrt(252)).\
-    iloc[252:].rename(columns={'Adj Close':'EMA'}).merge(data_ret_sigma, 
+    iloc[252:].rename(columns={'Close':'EMA'}).merge(data_ret_sigma, 
                                                          left_index=True,
                                                          right_index=True)
 statistics(data_ret_sigma).T
-data_ret_sigma.loc[t1y_date:].\
-    plot(title=f'{yh_tkrlst[0][:2]} Volatility', alpha=0.65)
+data_ret_sigma.loc[t1y_date:].plot(title='Volatility', alpha=0.65)
 
 #%% VOLATILITY
 # Function to compute daily ex ante variance estimate
@@ -752,7 +769,9 @@ bt_cols = ['Start','End','Signal','Entry_price','Exit_price', 'PnL',
            'M2M_IQR', 'M2M_Std', 'M2M_Skew', 'M2M_Med', 'M2M_Kurt']
 df_strat_bt = pd.DataFrame(columns = bt_cols)
 last_exit_day = df_valid_entry.index[0]
-for i,r in df_valid_entry.iterrows():
+col_px = [(s, name) for s in ['Open', 'High', 'Low']]
+
+for i,r in df_valid_entry.iterrows(): # i,r = list(df_valid_entry.iterrows())[0]
     # Valid entry day should be after last trade exit date
     if i < last_exit_day:
         continue
@@ -765,27 +784,31 @@ for i,r in df_valid_entry.iterrows():
     entry_day = df_strat[i:].iloc[1].name
     
     # Entry price at OHL mean price to account for price action
-    entry_price = data.loc[entry_day, ['Open', 'High', 'Low']].mean()
+    entry_price = data.loc[entry_day, col_px].mean()
     
     # Trade is closed at next day when exit signal is triggered
-    if r['Signal'] == 1: # Open position is long
+    if r['Entry'] == 1: # Open position is long
         # Filter data by possible exits from a long position
-        dates_valid_exit = df_strat.index[df_strat['Exit_Long'] != 0]
+        dates_valid_exit = df_strat.index[df_signals['Exit_Long'] != 0]
         col_maxProfit = 'High'
         col_maxLoss = 'Low'
     else: # Open position is short
         # Filter out by short-only exit signals
-        dates_valid_exit = df_strat.index[df_strat['Exit_Short'] != 0]
+        dates_valid_exit = df_strat.index[df_signals['Exit_Short'] != 0]
         col_maxProfit = 'Low'
         col_maxLoss = 'High'
     
     # Valid exits 
-    tmpdf_valid_exit = data.loc[dates_valid_exit].loc[i:]
+    tmpdf_valid_exit = data.loc[dates_valid_exit, col_px].loc[i:]
 
     # Check if trade still open
     if tmpdf_valid_exit.shape[0] < 2:
-        # Trade is still on, so possible exit price is on last observed day
-        exit_day = data.iloc[-1].name
+        if tmpdf_valid_exit.shape[0] < 1:
+            # Trade is still on, so possible exit price is on last observed day
+            exit_day = data.iloc[-1].name
+        else:
+            exit_day = tmpdf_valid_exit.iloc[0].name
+            
     else: # Exit signal triggered
         # Exit signal date
         date_exit_signal = tmpdf_valid_exit.iloc[0].name
@@ -796,36 +819,35 @@ for i,r in df_valid_entry.iterrows():
                 pd.tseries.offsets.BDay(1)
         else: 
             # Exit day following exit signal date
-            exit_day = data.loc[date_exit_signal:].iloc[1].name
+            exit_day = data.loc[date_exit_signal:, col_px].iloc[1].name
         
     # Exit price at OHL mean price to account for price action
-    exit_price = data.loc[exit_day][['Open', 'High', 'Low']].mean()
+    exit_price = data.loc[exit_day, col_px].mean()
     
     # Trade PnL
-    pnl = (exit_price - entry_price)*r['Signal']
+    pnl = (exit_price - entry_price)*r['Entry']
     
     # Trade duration
     dur_days = (exit_day - entry_day).days
     
     # Mark2Market PnL
-    m2m_ = (data.loc[entry_day:exit_day, 'Close'] - entry_price)*r['Signal']
+    m2m_ = (data.loc[entry_day:exit_day, ('Close', name)] - entry_price)*r['Entry']
     
     # Mark-2-market stats
     m2m_stats = statistics(m2m_.to_frame())
-    mfe = (max(data.loc[entry_day:exit_day, col_maxProfit]) - \
-        entry_price)*r['Signal']
-    mae = (min(data.loc[entry_day:exit_day, col_maxLoss]) - \
-        entry_price)*r['Signal']
+    mfe = (max(data.loc[entry_day:exit_day, (col_maxProfit, name)]) - \
+        entry_price)*r['Entry']
+    mae = (min(data.loc[entry_day:exit_day, (col_maxLoss, name)]) - \
+        entry_price)*r['Entry']
 
     # BT row data
-    tmp_bt_row = [entry_day, exit_day, r['Signal'], entry_price, exit_price, 
+    tmp_bt_row = [entry_day, exit_day, r['Entry'], entry_price, exit_price, 
                   pnl, dur_days, mfe, mae]+m2m_stats.to_numpy().tolist()[0]
     # Add obs to bt df
     df_strat_bt.loc[i] = tmp_bt_row
     
     # Update last exit day
     last_exit_day = exit_day
-
 
 #%% DISTRIBUTION ANALYSIS
 from statsmodels.distributions.empirical_distribution import ECDF
