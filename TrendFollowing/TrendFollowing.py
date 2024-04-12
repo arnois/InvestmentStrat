@@ -18,6 +18,49 @@ from pandas_datareader import data as pdr
 yf.pdr_override()
 import holidays
 import calendar
+import sys
+#%% CUSTOM MODULES
+str_cwd = r'H:\Python\TrendFollowing' # r'C:\Users\arnoi\Documents\Python Scripts'
+sys.path.append(str_cwd)
+from DataMan import DataMan
+from TrendMan import TrendMan
+#%% DATA
+# Path
+path = r'C:\Users\arnoi\Documents\db\etf_bbg.parquet'
+path = r'H:\db\etf_bbg.parquet'
+
+# Data Manager
+dfMgr = DataMan(datapath=path)
+
+# Data
+dfMgr.set_data_from_path()
+data = dfMgr.get_data()
+
+# Data subset
+data_slice = dfMgr.sliceDataFrame(dt_start='2016-12-31', 
+                     dt_end='2020-12-31', 
+                     lst_securities=['TLT','GLD','IWM'])
+# Correlation matrix between selected assets
+dfMgr.plot_corrmatrix(data_slice['Close'].diff(), txtCorr=True)
+
+# Data update
+xlpath_update = r'C:\Users\jquintero\db\datapull_etf_1D.xlsx'
+dfMgr.update_data(xlpath = xlpath_update)
+data = dfMgr.get_data()
+
+#%% TREND
+nes, nel = 21, 64
+TrendMgr = TrendMan(nes, nel)
+data_trend = TrendMgr.get_trend_data(data,'Close')
+
+# Check any assets TA
+name = 'IWM'
+namecol = [f'{name}_trend',f'{name}_trend_strength',
+           f'{name}_trend_status',f'{name}_ema_d']
+
+data_trend[namecol].iloc[-21:].merge(
+    data.loc[data_trend[namecol].iloc[-21:].index]['Close'][name]
+    , left_index=True, right_index=True)
 
 #%% UDF
 # function to get statistics for different variables in a dataframe
@@ -88,146 +131,6 @@ def plot_corrmatrix(df, dt_start = None, dt_end = None, lst_securities = None,
     plt.title(corrM.title(), size=20)
     plt.tight_layout();plt.show()
     return None
-
-#%% DATA FROM XL FILE (BBG)
-# Savepath
-path = r'C:\Users\arnoi\Documents\db\etf_bbg.parquet'
-path = r'H:\db\etf_bbg.parquet'
-
-# Data pull
-if os.path.isfile(path):
-    # From saved db
-    data = pd.read_parquet(path)
-else:
-    # Inception from xl file
-    xlpath = r'C:\Users\jquintero\db\datapull_etf_1D.xlsx'
-    data = pd.read_excel(xlpath)
-    tmpcols1 = data.iloc[4]; tmpcols2 = data.iloc[2]
-    tmpcols1[0] = 'Date'; tmpcols1 = tmpcols1.unique().tolist()
-    if np.nan in tmpcols1: tmpcols1.remove(np.nan)
-    tmpcols2[0] = 'Date'; tmpcols2 = tmpcols2.unique().tolist()
-    if np.nan in tmpcols2: tmpcols2.remove(np.nan)
-    if 'Date' in tmpcols1: tmpcols1.remove('Date')
-    if 'Date' in tmpcols2: tmpcols2.remove('Date')
-    tmpdf = data.iloc[5:]; tmpdf = tmpdf.rename(columns={tmpdf.columns[0]:'Date'})
-    tmpdf = tmpdf.set_index('Date').astype(float)
-    tmplist = []
-    for a in tmpcols2:
-        tmplist+=[(s,a) for s in tmpcols1]
-    mulidx = pd.MultiIndex.from_tuples(tmplist)
-    tmpdf.columns = mulidx
-    cols2chg_l1 = dict([(s,
-                         s.replace('PX_','').lower().capitalize().\
-                             replace('Last','Close')) 
-                        for s in tmpdf.columns.levels[0]])
-    cols2chg_l2 = dict([(s,
-                         s.replace(' US Equity','').replace(' Curncy','').\
-                             replace('XBTUSD','BTC')) 
-                        for s in tmpdf.columns.levels[1]])
-    tmpdf.rename(columns=cols2chg_l1, level=0, inplace=True)
-    tmpdf.rename(columns=cols2chg_l2, level=1, inplace=True)
-    tmpdf.to_parquet(path)
-    
-# Data update
-last_date_data = data.index[-1]
-todays_date = pd.Timestamp(dt.datetime.today().date()) - pd.tseries.offsets.\
-    BDay(1)
-isDataOOD = last_date_data < todays_date
-if isDataOOD:
-    print("Updating data... ")
-    # date range for new data
-    str_idt = last_date_data.strftime("%Y-%m-%d")
-    str_fdt = todays_date.strftime("%Y-%m-%d")
-    # new data
-    xlpath_update = r'C:\Users\jquintero\db\datapull_etf_1D.xlsx'
-    new_data = pd.read_excel(xlpath_update)
-    
-    tmpcols1 = new_data.iloc[4]; tmpcols2 = new_data.iloc[2]
-    tmpcols1[0] = 'Date'; tmpcols1 = tmpcols1.unique().tolist()
-    if np.nan in tmpcols1: tmpcols1.remove(np.nan)
-    tmpcols2[0] = 'Date'; tmpcols2 = tmpcols2.unique().tolist()
-    if np.nan in tmpcols2: tmpcols2.remove(np.nan)
-    if 'Date' in tmpcols1: tmpcols1.remove('Date')
-    if 'Date' in tmpcols2: tmpcols2.remove('Date')
-    tmpdf = new_data.iloc[5:]; tmpdf = tmpdf.rename(columns={tmpdf.columns[0]:'Date'})
-    tmpdf = tmpdf.set_index('Date').astype(float)
-    
-    tmplist = []
-    for a in tmpcols2:
-        tmplist+=[(s,a) for s in tmpcols1]
-    mulidx = pd.MultiIndex.from_tuples(tmplist)
-    tmpdf.columns = mulidx
-    
-    cols2chg_l1 = dict([(s,
-                         s.replace('PX_','').lower().capitalize().\
-                             replace('Last','Close')) 
-                        for s in tmpdf.columns.levels[0]])
-    cols2chg_l2 = dict([(s,
-                         s.replace(' US Equity','').replace(' Curncy','').\
-                             replace('XBTUSD','BTC')) 
-                        for s in tmpdf.columns.levels[1]])
-    
-    tmpdf.rename(columns=cols2chg_l1, level=0, inplace=True)
-    tmpdf.rename(columns=cols2chg_l2, level=1, inplace=True)
-        
-    # updated data
-    updated_data = pd.concat([data, tmpdf.loc[str_idt:str_fdt]]).\
-        reset_index().drop_duplicates(('Date','')).set_index('Date')
-    print("Saving data...")
-    updated_data.to_parquet(path)
-    data = pd.read_parquet(path)
-    
-#%% DATA FROM YFINANCE
-# Ticker list
-path_tkr_list = r'C:\Users\arnoi\Documents\Python Scripts\TrendFollowing'
-fname_tkr_list = r'\tickers_etf_yf.txt'
-yh_tkrlst = pd.read_csv(path_tkr_list+fname_tkr_list, 
-                        sep=",", header=None).to_numpy()[0].tolist()
-
-# for demo purposes we are using ZN (10Y T-Note) futures contract
-
-# Dates range
-str_idt, str_fdt = '2000-12-31', '2024-04-06'
-
-# Futures symbols
-#yh_tkrlst = ['ZT=F'] # ZT=F, ZF=F, ZN=F, TN=F
-
-# Data pull
-path = r'C:\Users\arnoi\Documents\db\etf_yf.parquet'
-path = r'H:\db\etf_yf.parquet'
-if os.path.isfile(path):
-    # From saved db
-    data = pd.read_parquet(path)
-else:
-    # Download data from yahoo finance
-    data = pdr.get_data_yahoo(yh_tkrlst, 
-                              start=str_idt, 
-                              end=str_fdt)
-    # Save db
-    data.to_parquet(path)
-
-# Data columns mgmt
-data.rename(columns={'BTC-USD':'BTC'}, level=1, inplace=True)
-
-# Data update
-last_date_data = data.index[-1]
-todays_date = pd.Timestamp(dt.datetime.today().date()) - pd.tseries.offsets.\
-    BDay(1)
-isDataOOD = last_date_data < todays_date
-if isDataOOD:
-    print("Updating data... ")
-    str_idt = last_date_data.strftime("%Y-%m-%d")
-    str_fdt = todays_date.strftime("%Y-%m-%d")
-    new_data = pdr.get_data_yahoo(yh_tkrlst, start=str_idt, end=str_fdt)
-    if new_data.index[-1] != todays_date:
-        str_fdt = (todays_date + pd.tseries.offsets.DateOffset(days=1)).\
-            strftime("%Y-%m-%d")
-        new_data = pdr.get_data_yahoo(yh_tkrlst, start=str_idt, end=str_fdt)
-    updated_data = pd.concat([data,new_data]).\
-        reset_index().drop_duplicates('Date').set_index('Date')
-    print("Saving data...")
-    updated_data.to_parquet(path)
-    data = pd.read_parquet(path)
     
 #%% TREND ANALYSIS
 nes = 21
@@ -275,6 +178,11 @@ for name in data['Close'].columns:
 name = 'IWM'
 namecol = [f'{name}_trend',f'{name}_trend_strength',
            f'{name}_trend_status',f'{name}_ema_d']
+
+data_trend[namecol].iloc[-21:].merge(
+    data.loc[data_ta[namecol].iloc[-21:].index]['Close'][name]
+    , left_index=True, right_index=True)
+
 data_ta[namecol].iloc[-21:].merge(
     data.loc[data_ta[namecol].iloc[-21:].index]['Close'][name]
     , left_index=True, right_index=True)
@@ -307,6 +215,8 @@ for name in data.columns:
 data_ta.iloc[-1][[f'{c}_trend' for c in nonwTrends]]
 
 #%% PRICE VIZ
+# Todays date
+todays_date = pd.Timestamp.today().date() 
 
 ## Plotting Price Levels
 fig, ax = plt.subplots()
