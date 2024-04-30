@@ -306,17 +306,27 @@ class DataMan:
         # Data verification
         if df is None:
             df = self._data
-        # Columns verification
+        # Columns filter verification
         lstIsEmpty = (lst_securities is None) or (lst_securities == [])
-        if lstIsEmpty:
-            tmplst = df.columns.levels[1].tolist()
-            tmpsecs = [[('Open', s),('High', s),('Low', s),('Close', s)] 
-                       for s in tmplst]
+        
+        # Columns level verification
+        if df.columns.nlevels > 1:
+            # For multiple index
+            if lstIsEmpty:
+                tmplst = df.columns.levels[1].tolist()
+                tmpsecs = [[('Open', s),('High', s),('Low', s),('Close', s)] 
+                           for s in tmplst]
+            else:
+                tmpsecs = [[('Open', s),('High', s),('Low', s),('Close', s)] 
+                           for s in lst_securities]
+            # Unlisting sublists
+            tmpsecs = [item for sublist in tmpsecs for item in sublist]
         else:
-            tmpsecs = [[('Open', s),('High', s),('Low', s),('Close', s)] 
-                       for s in lst_securities]
-        # Unlisting sublists
-        tmpsecs = [item for sublist in tmpsecs for item in sublist]
+            # For single index
+            if lstIsEmpty:
+                tmpsecs = df.columns.tolist()
+            else:
+                tmpsecs = lst_securities        
         
         # Column-filtered dataframe
         tmpdfret = df[tmpsecs]

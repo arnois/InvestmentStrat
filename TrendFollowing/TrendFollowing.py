@@ -24,6 +24,9 @@ str_cwd = r'H:\Python\TrendFollowing' # r'C:\Users\arnoi\Documents\Python Script
 sys.path.append(str_cwd)
 from DataMan import DataMan
 from TrendMan import TrendMan
+
+#%% UDF
+
 #%% DATA
 # Path
 path = r'C:\Users\arnoi\Documents\db\etf_bbg.parquet'
@@ -40,6 +43,9 @@ data = dfMgr.get_data()
 data_slice = dfMgr.sliceDataFrame(dt_start='2016-12-31', 
                      dt_end='2020-12-31', 
                      lst_securities=['TLT','GLD','IWM'])
+# Data stats
+dfMgr.statistics(data_slice.apply(np.log).diff().dropna()['Close']).T
+
 # Correlation matrix between selected assets
 dfMgr.plot_corrmatrix(data_slice['Close'].diff(), txtCorr=True)
 
@@ -51,168 +57,39 @@ data = dfMgr.get_data()
 #%% TREND
 nes, nel = 21, 64
 TrendMgr = TrendMan(nes, nel)
-data_trend = TrendMgr.get_trend_data(data,'Close')
+TrendMgr.set_trend_data(data,'Close')
+data_trend = TrendMgr.get_trend_data()
 
 # Check any assets TA
 name = 'IWM'
 namecol = [f'{name}_trend',f'{name}_trend_strength',
            f'{name}_trend_status',f'{name}_ema_d']
 
+# Trend + dynamics
 data_trend[namecol].iloc[-21:].merge(
     data.loc[data_trend[namecol].iloc[-21:].index]['Close'][name]
     , left_index=True, right_index=True)
-
-#%% UDF
-# function to get statistics for different variables in a dataframe
-def statistics(data):
-    """
-    Returns: Summary stats for each serie in the input DataFrame.
-    """
-    from scipy import stats
-    tmpmu = np.round(data.mean().values,4)
-    tmptmu_5pct = np.round(stats.trim_mean(data, 0.05),4)
-    tmpiqr = np.round(data.apply(stats.iqr).values,4)
-    tmpstd = np.round(data.std().values,4)
-    tmpskew = np.round(data.apply(stats.skew).values,4)
-    tmpme = np.round(data.median().values,4)
-    tmpkurt = np.round(data.apply(stats.kurtosis).values,4)
-    tmpcol = ['Mean', '5% Trimmed Mean', 'Interquartile Range', 
-              'Standard Deviation', 'Skewness', 'Median', 'Kurtosis']
-    tmpdf = pd.DataFrame([tmpmu, tmptmu_5pct, tmpiqr,
-                        tmpstd, tmpskew, tmpme, tmpkurt]).T
-    tmpdf.columns = tmpcol
-    tmpdf.index = data.columns
-    return tmpdf
-
-# function to manage row and column ranges
-def sliceDataFrame(df, dt_start = None, dt_end = None, lst_securities = None):
-    # columns verification
-    lstIsEmpty = (lst_securities is None) or (lst_securities == [])
-    if lstIsEmpty:
-        tmpsecs = df.columns.tolist()
-    else:
-        tmpsecs = lst_securities
-    
-    # column-filtered df
-    tmpdfret = df[tmpsecs]
-
-    # date range verification
-    if (dt_start is None) or not (np.any(tmpdfret.index >= pd.to_datetime(dt_start))):
-        tmpstr1 = df.index.min()
-    else:
-        tmpstr1 = dt_start
-    if (dt_end is None) or not (np.any(tmpdfret.index >= pd.to_datetime(dt_end))):
-        tmpstr2 = df.index.max()
-    else:
-        tmpstr2 = dt_end
-        
-    return tmpdfret.loc[tmpstr1:tmpstr2,tmpsecs].dropna()
-
-# funciton to plot correlation matrix among features
-def plot_corrmatrix(df, dt_start = None, dt_end = None, lst_securities = None, 
-                    plt_size = (10,8), txtCorr = False, corrM = 'spearman'):
-    """
-    Returns: Correlation matrix.
-    """
-    from seaborn import heatmap
-    # securities and date ranges verification
-    df_ = sliceDataFrame(df=df, dt_start=dt_start, 
-                         dt_end=dt_end, lst_securities=lst_securities)
-    tmpdfret = df_
-    
-    # corrmatrix
-    plt.figure(figsize=plt_size)
-    heatmap(
-        tmpdfret.corr(method=corrM.lower()),        
-        cmap='RdBu', 
-        annot=txtCorr, 
-        vmin=-1, vmax=1,
-        fmt='.2f')
-    plt.title(corrM.title(), size=20)
-    plt.tight_layout();plt.show()
-    return None
     
 #%% TREND ANALYSIS
-nes = 21
-nel = 64
 
-# Smoothed data over closing prices
-data_ema = data['Close'].\
-    apply(lambda s: ta.ema(s, nes)).\
-    rename(columns=dict(zip(data['Close'].columns,
-                            [f'{s}_EMA_ST' for s in data['Close'].columns]))).merge(
-    data['Close'].\
-        apply(lambda s: ta.ema(s, nel)).\
-        rename(columns=dict(zip(data['Close'].columns,
-                                [f'{s}_EMA_LT' for s in data['Close'].columns]))),                      
-    left_index=True, right_index=True)
-
-# Trend + dynamics
-data_ta = pd.DataFrame()
-for name in data['Close'].columns:
-    # Short EMA
-    tmp_sema = data_ema[f'{name}_EMA_ST']
-    
-    # Long EMA
-    tmp_lema = data_ema[f'{name}_EMA_LT']
-    
-    # Trend strength
-    tmp_emadiff = (tmp_sema - tmp_lema)
-    tmp_strength = pd.Series('normal',index=tmp_emadiff.index)
-    tmp_strength[abs(tmp_emadiff) >= tmp_emadiff.std()] = 'strong'
-    tmp_strength[tmp_emadiff <= tmp_emadiff.std()/2] = 'weak'
-    
-    # Trend status; 5-EMA of the RoC of the EMA difference
-    tmp_status = tmp_emadiff.diff().rename('Close').to_frame().ta.ema(5)
-    
-    # Trend specs
-    data_ta = pd.\
-        concat([data_ta, 
-                tmp_emadiff.apply(np.sign).rename(f'{name}_trend').to_frame(),
-                tmp_strength.rename(f'{name}_trend_strength').to_frame(),
-                tmp_status.rename(f'{name}_trend_status').to_frame(),
-                tmp_emadiff.rename(f'{name}_ema_d').to_frame()], 
-               axis=1)    
-    
-# Check any assets TA
-name = 'IWM'
-namecol = [f'{name}_trend',f'{name}_trend_strength',
-           f'{name}_trend_status',f'{name}_ema_d']
-
-data_trend[namecol].iloc[-21:].merge(
-    data.loc[data_ta[namecol].iloc[-21:].index]['Close'][name]
-    , left_index=True, right_index=True)
-
-data_ta[namecol].iloc[-21:].merge(
-    data.loc[data_ta[namecol].iloc[-21:].index]['Close'][name]
-    , left_index=True, right_index=True)
-
-# Assets trend stengthness by ST-LT EMA Differences
-from sklearn.preprocessing import StandardScaler
-sc = StandardScaler()
-
-# Trend strength - as a smoothed short-long EMA difference
-X_strength = data_ta.loc['2004-03-29':,[f'{s}_ema_d' for s in data.columns]]
-
-# Z-scaled strength
-data_strength_Z = pd.DataFrame(sc.fit_transform(X_strength), 
-             columns = data.columns, index=X_strength.index).fillna(0).abs()
-
-# Strength-based weights
+# TrendStrength-based weights
+data_strength_Z = TrendMgr.get_trend_strength_Z().abs()
 data_w = data_strength_Z.apply(lambda x: x/x.sum(), axis=1)
+data_w.columns = [s.replace('_ema_d','') for s in data_w.columns]
+print(f"Last W's:\n{round(100*data_w.iloc[-5:].T,0)}")
 
 # Filter out non-weak trends
 nonwTrends = []
-for name in data.columns:
+for name in data.columns.levels[1]:
     # Trend strength
     tmpcol = f'{name}_trend_strength'
-    if data_ta.iloc[-1][f'{name}_trend_strength'] == 'weak':
+    if data_trend.iloc[-1][f'{name}_trend_strength'] == 'weak':
         continue
     else:
         nonwTrends.append(name)
 
 # Non-weak Trending Assets
-data_ta.iloc[-1][[f'{c}_trend' for c in nonwTrends]]
+data_trend.iloc[-1][[f'{c}_trend' for c in nonwTrends]]
 
 #%% PRICE VIZ
 # Todays date
@@ -238,8 +115,8 @@ tmptkr = ('Close', tmpetf)
 t1y_date = todays_date - pd.tseries.offsets.DateOffset(years=1)
 fig, ax = plt.subplots()
 ax.plot(data.loc[t1y_date:,tmptkr].dropna(),c='darkcyan')
-ax.plot(data_ema.loc[t1y_date:,tmpetf+'_EMA_ST'],'--', c='C0')
-ax.plot(data_ema.loc[t1y_date:,tmpetf+'_EMA_LT'],'--',c='orange')
+ax.plot(data_trend.loc[t1y_date:,tmpetf+'_EMA_ST'],'--', c='C0')
+ax.plot(data_trend.loc[t1y_date:,tmpetf+'_EMA_LT'],'--',c='orange')
 myFmt = mdates.DateFormatter('%d%b%Y')
 ax.xaxis.set_major_formatter(myFmt)
 ax.set_xlabel('')
@@ -281,7 +158,7 @@ data_ret_sigma = (data_ret[tmpNames].\
     iloc[252:].rename(columns={'Close':'EMA'}).merge(data_ret_sigma, 
                                                          left_index=True,
                                                          right_index=True)
-statistics(data_ret_sigma).T
+dfMgr.statistics(data_ret_sigma).T
 data_ret_sigma.loc[t1y_date:].plot(title='Volatility', alpha=0.65)
 
 #%% VOLATILITY
@@ -416,7 +293,7 @@ from pandas.plotting import scatter_matrix
 scatter_matrix(df_ret_TvF[['F12W','F4W','F2W','F1W','T12M']], alpha=0.5, 
                figsize=(10, 6), diagonal='kde')
 # corr
-plot_corrmatrix(df_ret_TvF, dt_start = '2021-02-20', dt_end = '2024-02-20', 
+dfMgr.plot_corrmatrix(df_ret_TvF, dt_start = '2021-02-20', dt_end = '2024-02-20', 
                 lst_securities = ['F12W','F4W','F2W','F1W',
                                   'T12M','T9M','T6M','T3M','T1M'], 
                 plt_size = (10,8), txtCorr = False, corrM = 'spearman')
@@ -537,7 +414,7 @@ for i,r in df_reb_dates.items():
 
 # Plot backtest res
 np.exp(df_strat['R'].cumsum()).plot(title='Trend: T9M Sign\nReb: Weekly+T1M')
-statistics(df_strat[['R','PnL']]).T
+dfMgr.statistics(df_strat[['R','PnL']]).T
 df_strat['PnL'].cumsum().plot()
 
 #%% STRAT: Trend filter + Xover signal /RETURNS
@@ -620,7 +497,7 @@ df_strat_byXover['PnL'] = df_strat_byXover.\
 
 # Results plot
 np.exp(df_strat_byXover['R'].cumsum()).plot(title='Trend: T9M Sign\nReb: 1Mxo0')
-statistics(df_strat_byXover[['R','PnL']]).T
+dfMgr.statistics(df_strat_byXover[['R','PnL']]).T
 df_strat_byXover['PnL'].cumsum().plot()
 
 #%% STRAT: Trend filter + price xover signal /PRICE
@@ -630,14 +507,14 @@ df_strat_byXover['PnL'].cumsum().plot()
 # Base data for strat
 name = 'IWM'
 tmpcols = [f'{name}_EMA_{s}' for s in ['ST','LT']]
-df_strat = data_ema[tmpcols]
+df_strat = data_trend[tmpcols]
 
 # Temporal price+indicator info
 df_col = ('Close',name)
 df_tmp = data[[df_col]].merge(
     data[[df_col]].shift().rename(columns={name:f'{name}_1'}, level=1), 
     left_index=True, right_index=True).droplevel(0, axis=1).\
-    merge(data_ema[tmpcols], left_index=True, right_index=True)
+    merge(data_trend[tmpcols], left_index=True, right_index=True)
 
 # Entry signals
 df_signals = pd.DataFrame(index = df_tmp.index)
@@ -647,7 +524,7 @@ df_signals['Exit_Long'] = 0
 df_signals['Exit_Short'] = 0
 
 # Trend signals
-df_signals['Trend'] += data_ta[f'{name}_trend'].fillna(0).astype(int)
+df_signals['Trend'] += data_trend[f'{name}_trend'].fillna(0).astype(int)
     
 # Buy signals
 df_signals['Entry'] += df_tmp.apply(lambda s: 
@@ -744,7 +621,7 @@ for i,r in df_valid_entry.iterrows(): # i,r = list(df_valid_entry.iterrows())[0]
     m2m_ = (data.loc[entry_day:exit_day, ('Close', name)] - entry_price)*r['Entry']
     
     # Mark-2-market stats
-    m2m_stats = statistics(m2m_.to_frame())
+    m2m_stats = dfMgr.statistics(m2m_.to_frame())
     mfe = (max(data.loc[entry_day:exit_day, (col_maxProfit, name)]) - \
         entry_price)*r['Entry']
     mae = (min(data.loc[entry_day:exit_day, (col_maxLoss, name)]) - \
