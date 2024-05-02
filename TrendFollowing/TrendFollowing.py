@@ -20,7 +20,7 @@ import holidays
 import calendar
 import sys
 #%% CUSTOM MODULES
-str_cwd = r'H:\Python\TrendFollowing' # r'C:\Users\arnoi\Documents\Python Scripts'
+str_cwd = r'H:\Python\TrendFollowing' # str_cwd=r'C:\Users\arnoi\Documents\Python Scripts\TrendFollowing'
 sys.path.append(str_cwd)
 from DataMan import DataMan
 from TrendMan import TrendMan
@@ -72,11 +72,17 @@ data_trend[namecol].iloc[-21:].merge(
     
 #%% TREND ANALYSIS
 
-# TrendStrength-based weights
-data_strength_Z = TrendMgr.get_trend_strength_Z().abs()
+# TrendStrength-based weigths
+data_strength_Z = TrendMgr.get_trend_strength_Z()
 data_w = data_strength_Z.apply(lambda x: x/x.sum(), axis=1)
 data_w.columns = [s.replace('_ema_d','') for s in data_w.columns]
 print(f"Last W's:\n{round(100*data_w.iloc[-5:].T,0)}")
+
+# Long-only subcase
+data_w_lOnly = (((data_strength_Z.apply(np.sign)+1)/2).\
+    fillna(0)*data_strength_Z).apply(lambda x: x/x.sum(), axis=1)
+data_w_lOnly.columns = [s.replace('_ema_d','') for s in data_w_lOnly.columns]
+print(f"Last Long-Only W's:\n{round(100*data_w_lOnly.iloc[-5:].T,0)}")
 
 # Filter out non-weak trends
 nonwTrends = []
@@ -503,6 +509,9 @@ df_strat_byXover['PnL'].cumsum().plot()
 #%% STRAT: Trend filter + price xover signal /PRICE
 # Trend is determined by the relative position of the short over the long EMA
 # Signal is determined by the price xover the short EMA
+
+# TO DO: Define class StratMan to set signals and to get results on defined
+# entry-exit strategies.
 
 # Base data for strat
 name = 'IWM'
