@@ -508,55 +508,50 @@ df_strat_byXover['PnL'].cumsum().plot()
 
 #%% STRAT: Trend filter + price xover signal /PRICE
 # Trend is determined by the relative position of the short over the long EMA
-# Signal is determined by the price xover the short EMA
+# Signal is defined by price xover over the short EMA
+from StratMan import StratMan
 
-# TO DO: Define class StratMan to set signals and to get results on defined
-# entry-exit strategies.
+# Strategy
+StratMgr = StratMan(data, data_trend)
+StratMgr.set_strat()
+
+# Strat backtest results
+StratMgr.set_strat_results()
+dic_strat_res = StratMgr.get_strat_results()
+
+# Strat signals
+dicSgnls = StratMgr.get_signals_data()
 
 # Base data for strat
-name = 'IWM'
-tmpcols = [f'{name}_EMA_{s}' for s in ['ST','LT']]
-df_strat = data_trend[tmpcols]
-
-# Temporal price+indicator info
-df_col = ('Close',name)
-df_tmp = data[[df_col]].merge(
-    data[[df_col]].shift().rename(columns={name:f'{name}_1'}, level=1), 
-    left_index=True, right_index=True).droplevel(0, axis=1).\
-    merge(data_trend[tmpcols], left_index=True, right_index=True)
-
-# Entry signals
-df_signals = pd.DataFrame(index = df_tmp.index)
-df_signals['Trend'] = 0
-df_signals['Entry'] = 0
-df_signals['Exit_Long'] = 0
-df_signals['Exit_Short'] = 0
-
-# Trend signals
-df_signals['Trend'] += data_trend[f'{name}_trend'].fillna(0).astype(int)
-    
-# Buy signals
-df_signals['Entry'] += df_tmp.apply(lambda s: 
-    (s[name+'_1'] < s[name+'_EMA_ST'])*(s[name] > s[name+'_EMA_ST'])*1, axis=1)
-
-# Sell signals
-df_signals['Entry'] += df_tmp.apply(lambda s: 
-    (s[name+'_1'] > s[name+'_EMA_ST'])*(s[name] < s[name+'_EMA_ST'])*-1, axis=1)
-    
-# Exit longs
-df_signals['Exit_Long'] += df_tmp.apply(lambda x: 
-    (x[name+'_1'] > x[name+'_EMA_LT'])*(x[name] < x[name+'_EMA_LT'])*1, axis=1)
-
-# Exit shorts
-df_signals['Exit_Short'] += df_tmp.apply(lambda x: 
-    (x[name+'_1'] < x[name+'_EMA_LT'])*(x[name] > x[name+'_EMA_LT']), axis=1)
-
+name = 'EFA'
+df_signals = dicSgnls[name]
+df_pxi = StratMgr.get_PricePlusIndicators_data(name)
 # Valid entries
-df_valid_entry = ((df_signals['Trend']*df_signals['Entry'] > 0)*df_signals['Entry']).\
-    rename('Entry').to_frame()
-df_valid_entry = df_valid_entry[df_valid_entry['Entry'] != 0]
+df_valid_entry = StratMgr.get_valid_entry(name)
+# Backtest results
+df_strat_bt = dic_strat_res[name](name)
 
-df_tmp.loc[df_valid_entry.index[0]-pd.Timedelta(days=3):df_valid_entry.index[0]+pd.Timedelta(days=1)]
+# BT res for each asset strat
+tmpdic = {}
+for name in data.columns.levels[1]:
+    tmpdic[name] = dic_strat_res[name](name)
+    
+# PnL of each asset
+res = pd.DataFrame(index = data.columns.levels[1],
+                   columns = ['TRet','avgRet','stdRet','avgPnL','avgDur',
+                              'avgMFE','avgMAE','avgM2M_Mean','avgM2M_Std', 
+                              'avgM2M_Skew'])
+for name in data.columns.levels[1]:
+    res.loc[name, 'TRet'] = (tmpdic[name]['PnL']/tmpdic[name]['Entry_price']+1).prod()-1
+    res.loc[name, 'avgRet'] = (tmpdic[name]['PnL']/tmpdic[name]['Entry_price']).mean()
+    res.loc[name, 'stdRet'] = (tmpdic[name]['PnL']/tmpdic[name]['Entry_price']).std()
+    res.loc[name, 'avgPnL'] = tmpdic[name]['PnL'].mean()
+    res.loc[name, 'avgDur'] = tmpdic[name]['Dur_days'].mean()
+    res.loc[name, 'avgMFE'] = (tmpdic[name]['MaxGain(MFE)']/tmpdic[name]['Entry_price']).mean()
+    res.loc[name, 'avgMAE'] = (tmpdic[name]['MaxLoss(MAE)']/tmpdic[name]['Entry_price']).mean()
+    res.loc[name, 'avgM2M_Mean'] =(tmpdic[name]['M2M_Mean']/tmpdic[name]['Entry_price']).mean()
+    res.loc[name, 'avgM2M_Std'] = (tmpdic[name]['M2M_Std']/tmpdic[name]['Entry_price']).std()
+    res.loc[name, 'avgM2M_Skew'] = (tmpdic[name]['M2M_Skew']/tmpdic[name]['Entry_price']).mean()
 
 ###############################################################################
 # Backtest run
@@ -572,12 +567,12 @@ for i,r in df_valid_entry.iterrows(): # i,r = list(df_valid_entry.iterrows())[0]
     if i < last_exit_day:
         continue
     # Check if signal is from today
-    if df_strat[i:].shape[0] < 1:
-        # We actually are seeing this singal live. Trade at tomorrows open.
+    if df_pxi[i:].shape[0] < 1 or df_pxi[i:].index[-1] == i:
+        # We actually are seeing this signal live. Trade at tomorrows open.
         break
     
     # Trade signal triggers a trade at next day
-    entry_day = df_strat[i:].iloc[1].name
+    entry_day = df_pxi[i:].iloc[1].name
     
     # Entry price at OHL mean price to account for price action
     entry_price = data.loc[entry_day, col_px].mean()
@@ -585,12 +580,12 @@ for i,r in df_valid_entry.iterrows(): # i,r = list(df_valid_entry.iterrows())[0]
     # Trade is closed at next day when exit signal is triggered
     if r['Entry'] == 1: # Open position is long
         # Filter data by possible exits from a long position
-        dates_valid_exit = df_strat.index[df_signals['Exit_Long'] != 0]
+        dates_valid_exit = df_pxi.index[df_signals['Exit_Long'] != 0]
         col_maxProfit = 'High'
         col_maxLoss = 'Low'
     else: # Open position is short
         # Filter out by short-only exit signals
-        dates_valid_exit = df_strat.index[df_signals['Exit_Short'] != 0]
+        dates_valid_exit = df_pxi.index[df_signals['Exit_Short'] != 0]
         col_maxProfit = 'Low'
         col_maxLoss = 'High'
     
