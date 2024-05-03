@@ -519,6 +519,45 @@ StratMgr.set_strat()
 StratMgr.set_strat_results()
 dic_strat_res = StratMgr.get_strat_results()
 
+# BT res for each asset strat
+tmpdic = {}
+for name in data.columns.levels[1]:
+    tmpdic[name] = dic_strat_res[name](name)
+    
+# PnL of each asset
+res = pd.DataFrame(index = data.columns.levels[1],
+                   columns = ['TRet','avgRet','Acc','stdRet','avgDur',
+                              'avgMFE','avgMAE','avgM2M_Mean','avgM2M_Std', 
+                              'avgM2M_Skew'])
+for name in data.columns.levels[1]:
+    res.loc[name, 'TRet'] = (tmpdic[name]['PnL']/tmpdic[name]['Entry_price']+1).prod()-1
+    res.loc[name, 'avgRet'] = (tmpdic[name]['PnL']/tmpdic[name]['Entry_price']).mean()
+    res.loc[name, 'Acc'] = tmpdic[name][tmpdic[name]['PnL']>0].shape[0]/tmpdic[name].shape[0]
+    res.loc[name, 'stdRet'] = (tmpdic[name]['PnL']/tmpdic[name]['Entry_price']).std()
+    res.loc[name, 'avgDur'] = tmpdic[name]['Dur_days'].mean()
+    res.loc[name, 'avgMFE'] = (tmpdic[name]['MaxGain(MFE)']/tmpdic[name]['Entry_price']).mean()
+    res.loc[name, 'avgMAE'] = (tmpdic[name]['MaxLoss(MAE)']/tmpdic[name]['Entry_price']).mean()
+    res.loc[name, 'avgM2M_Mean'] =(tmpdic[name]['M2M_Mean']/tmpdic[name]['Entry_price']).mean()
+    res.loc[name, 'avgM2M_Std'] = (tmpdic[name]['M2M_Std']/tmpdic[name]['Entry_price']).std()
+    res.loc[name, 'avgM2M_Skew'] = (tmpdic[name]['M2M_Skew']/tmpdic[name]['Entry_price']).mean()
+
+# Cum returns
+cumRet = pd.DataFrame()
+for name in data.columns.levels[1]:
+    cumRet = pd.concat([cumRet, tmpdic[name].\
+                          apply(lambda x: 1+x['PnL']/x['Entry_price'], 
+                                axis=1).cumprod().rename(name).to_frame()],
+                 axis=1)
+
+df_RetIdx = cumRet.ffill().fillna(1)*100
+df_RetIdx[df_RetIdx.columns[df_RetIdx.iloc[-1] >= 100]].drop('BTC', axis=1).\
+    plot().legend(loc='center left',bbox_to_anchor=(1.0, 0.5))
+
+# Top performers
+names_top = res['TRet'].sort_values(ascending=False)[:5].index.\
+    insert(-1,res['avgRet'].sort_values(ascending=False)[:5].index).unique()
+res.loc[names_top].T
+
 # Strat signals
 dicSgnls = StratMgr.get_signals_data()
 
@@ -531,27 +570,7 @@ df_valid_entry = StratMgr.get_valid_entry(name)
 # Backtest results
 df_strat_bt = dic_strat_res[name](name)
 
-# BT res for each asset strat
-tmpdic = {}
-for name in data.columns.levels[1]:
-    tmpdic[name] = dic_strat_res[name](name)
-    
-# PnL of each asset
-res = pd.DataFrame(index = data.columns.levels[1],
-                   columns = ['TRet','avgRet','stdRet','avgPnL','avgDur',
-                              'avgMFE','avgMAE','avgM2M_Mean','avgM2M_Std', 
-                              'avgM2M_Skew'])
-for name in data.columns.levels[1]:
-    res.loc[name, 'TRet'] = (tmpdic[name]['PnL']/tmpdic[name]['Entry_price']+1).prod()-1
-    res.loc[name, 'avgRet'] = (tmpdic[name]['PnL']/tmpdic[name]['Entry_price']).mean()
-    res.loc[name, 'stdRet'] = (tmpdic[name]['PnL']/tmpdic[name]['Entry_price']).std()
-    res.loc[name, 'avgPnL'] = tmpdic[name]['PnL'].mean()
-    res.loc[name, 'avgDur'] = tmpdic[name]['Dur_days'].mean()
-    res.loc[name, 'avgMFE'] = (tmpdic[name]['MaxGain(MFE)']/tmpdic[name]['Entry_price']).mean()
-    res.loc[name, 'avgMAE'] = (tmpdic[name]['MaxLoss(MAE)']/tmpdic[name]['Entry_price']).mean()
-    res.loc[name, 'avgM2M_Mean'] =(tmpdic[name]['M2M_Mean']/tmpdic[name]['Entry_price']).mean()
-    res.loc[name, 'avgM2M_Std'] = (tmpdic[name]['M2M_Std']/tmpdic[name]['Entry_price']).std()
-    res.loc[name, 'avgM2M_Skew'] = (tmpdic[name]['M2M_Skew']/tmpdic[name]['Entry_price']).mean()
+
 
 ###############################################################################
 # Backtest run
