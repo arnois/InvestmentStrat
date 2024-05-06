@@ -42,7 +42,7 @@ data = dfMgr.get_data()
 # Data subset
 data_slice = dfMgr.sliceDataFrame(dt_start='2016-12-31', 
                      dt_end='2020-12-31', 
-                     lst_securities=['TLT','GLD','IWM'])
+                     lst_securities=['TLT','GLD','IWM','URA','USO'])
 # Data stats
 dfMgr.statistics(data_slice.apply(np.log).diff().dropna()['Close']).T
 
@@ -53,6 +53,9 @@ dfMgr.plot_corrmatrix(data_slice['Close'].diff(), txtCorr=True)
 xlpath_update = r'C:\Users\jquintero\db\datapull_etf_1D.xlsx'
 dfMgr.update_data(xlpath = xlpath_update)
 data = dfMgr.get_data()
+
+# Asset names
+names = np.array([s for s in data.columns.levels[1] if s != ''])
 
 #%% TREND
 nes, nel = 21, 64
@@ -76,17 +79,17 @@ data_trend[namecol].iloc[-21:].merge(
 data_strength_Z = TrendMgr.get_trend_strength_Z()
 data_w = data_strength_Z.apply(lambda x: x/x.sum(), axis=1)
 data_w.columns = [s.replace('_ema_d','') for s in data_w.columns]
-print(f"Last W's:\n{round(100*data_w.iloc[-5:].T,0)}")
+print(f"Last W's:\n{round(100*data_w.iloc[-5:].T,0)}\n")
 
 # Long-only subcase
 data_w_lOnly = (((data_strength_Z.apply(np.sign)+1)/2).\
     fillna(0)*data_strength_Z).apply(lambda x: x/x.sum(), axis=1)
 data_w_lOnly.columns = [s.replace('_ema_d','') for s in data_w_lOnly.columns]
-print(f"Last Long-Only W's:\n{round(100*data_w_lOnly.iloc[-5:].T,0)}")
+print(f"Last Long-Only W's:\n{round(100*data_w_lOnly.iloc[-5:].T,0)}\n")
 
 # Filter out non-weak trends
 nonwTrends = []
-for name in data.columns.levels[1]:
+for name in names:
     # Trend strength
     tmpcol = f'{name}_trend_strength'
     if data_trend.iloc[-1][f'{name}_trend_strength'] == 'weak':
@@ -521,7 +524,7 @@ dic_strat_res = StratMgr.get_strat_results()
 
 # BT res for each asset strat
 tmpdic = {}
-for name in data.columns.levels[1]:
+for name in names:
     tmpdic[name] = dic_strat_res[name](name)
     
 # PnL of each asset
@@ -529,7 +532,7 @@ res = pd.DataFrame(index = data.columns.levels[1],
                    columns = ['TRet','avgRet','Acc','stdRet','avgDur',
                               'avgMFE','avgMAE','avgM2M_Mean','avgM2M_Std', 
                               'avgM2M_Skew'])
-for name in data.columns.levels[1]:
+for name in names:
     res.loc[name, 'TRet'] = (tmpdic[name]['PnL']/tmpdic[name]['Entry_price']+1).prod()-1
     res.loc[name, 'avgRet'] = (tmpdic[name]['PnL']/tmpdic[name]['Entry_price']).mean()
     res.loc[name, 'Acc'] = tmpdic[name][tmpdic[name]['PnL']>0].shape[0]/tmpdic[name].shape[0]
@@ -543,7 +546,7 @@ for name in data.columns.levels[1]:
 
 # Cum returns
 cumRet = pd.DataFrame()
-for name in data.columns.levels[1]:
+for name in names:
     cumRet = pd.concat([cumRet, tmpdic[name].\
                           apply(lambda x: 1+x['PnL']/x['Entry_price'], 
                                 axis=1).cumprod().rename(name).to_frame()],
