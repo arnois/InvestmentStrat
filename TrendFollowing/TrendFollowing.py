@@ -7,17 +7,9 @@ Trend following investemnt strategy tool kit.
 #%% MODULES
 import numpy as np
 import pandas as pd
-import pandas_ta as ta
 from matplotlib import pyplot as plt
 import matplotlib.dates as mdates
 import os
-import datetime as dt
-#from matplotlib.ticker import StrMethodFormatter
-import yfinance as yf
-from pandas_datareader import data as pdr
-yf.pdr_override()
-import holidays
-import calendar
 import sys
 #%% WORKING DIRECTORY
 str_cwd = r'H:\Python\TrendFollowing' 
@@ -31,8 +23,6 @@ else:
 #%% CUSTOM MODULES
 from DataMan import DataMan
 from TrendMan import TrendMan
-#%% UDF
-
 #%% DATA
 # Path
 path = r'H:\db\etf_bbg.parquet'
@@ -110,7 +100,7 @@ for name in names:
 # Non-weak Trending Assets
 print(f"\nNon-Weak Trends\n{data_trend.iloc[-1][[f'{c}_trend' for c in nonwTrends]]}")
 
-#%% PRICE VIZ
+#%% PRICE & TREND VIZ
 # Todays date
 todays_date = pd.Timestamp.today().date() 
 
