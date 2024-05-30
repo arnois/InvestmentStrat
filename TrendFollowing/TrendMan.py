@@ -149,6 +149,7 @@ class TrendMan:
             # Columns
             selcol = f'{name}_ema_d'
             mcol = f'{name}_trend_strength'
+            self.__data[mcol] = None
             # Strong dates
             idx_strong = tsZ[abs(tsZ[selcol]) >= 1].index
             self.__data.loc[idx_strong, mcol] = 'strong'
@@ -193,7 +194,7 @@ class TrendMan:
         
         # Set attributes
         self.__data = pd.concat([data_ema, ta], axis=1)
-        self.__names = data.columns.levels[1]
+        self.__names = data.columns.levels[1][data.columns.levels[1] != '']
         
         # Set trend strength class
         self.__set_trend_strength_Z__()

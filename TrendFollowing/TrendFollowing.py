@@ -136,6 +136,8 @@ ax.legend(['Price','Short EMA', 'Long EMA'],
           loc='best', bbox_to_anchor=(1.01,1.01))
 plt.xticks(rotation=45)
 plt.tight_layout(); plt.show()
+##
+print(pd.concat([data[tmptkr],data_trend[tmpetf+'_EMA_ST']],axis=1).iloc[-21:])
 #%% STRAT: Trend filter + price xover signal /PRICE
 # Trend is determined by the relative position of the short over the long EMA
 # Signal is defined by price xover over the short EMA
@@ -205,7 +207,6 @@ df_strat_bt = dic_strat_res[name](name)
 
 #%% DISTRIBUTION ANALYSIS
 from statsmodels.distributions.empirical_distribution import ECDF
-from scipy import stats
 
 # Returns distribution
 bt_ret = df_strat_bt['PnL']/df_strat_bt['Entry_price']
