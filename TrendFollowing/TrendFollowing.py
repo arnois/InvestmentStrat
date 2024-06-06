@@ -26,7 +26,7 @@ from TrendMan import TrendMan
 #%% DATA
 # Path
 path = r'H:\db\etf_bbg.parquet'
-if not os.path.exists(path):    path = cwdp_parent+r'\etf_bbg.parquet'
+if not os.path.exists(path):    path = cwdp_parent+r'\etf_bbg.parquet' # eqty
 
 # Data Manager
 dfMgr = DataMan(datapath=path)
@@ -47,7 +47,7 @@ dfMgr.plot_corrmatrix(data_slice['Close'].diff(), txtCorr=True)
 
 # Data update
 try:
-    xlpath_update = r'C:\Users\jquintero\db\datapull_etf_1D.xlsx'
+    xlpath_update = r'C:\Users\jquintero\db\datapull_etf_1D.xlsx' # eqty
     dfMgr.update_data(xlpath = xlpath_update)
     data = dfMgr.get_data()
 except FileNotFoundError:
@@ -63,7 +63,7 @@ TrendMgr.set_trend_data(data,'Close')
 data_trend = TrendMgr.get_trend_data()
 
 # Check any assets TA
-name = 'IWM'
+name = 'SBUX' # IWM
 namecol = [f'{name}_trend',f'{name}_trend_strength',
            f'{name}_trend_status',f'{name}_ema_d']
 
@@ -106,7 +106,7 @@ todays_date = pd.Timestamp.today().date()
 
 ## Plotting Price Levels
 fig, ax = plt.subplots()
-tmpetf = ['GLD','COPX','URA','IWM']
+tmpetf = ['WMT','XOM','DIS','SBUX'] # ['GLD','COPX','URA','IWM']
 tmptkrs = [('Close', s) for s in tmpetf]
 tmpdf = data.loc['2024':,tmptkrs].dropna()/data.loc['2024':,tmptkrs].dropna().iloc[0]*100
 ax.plot(tmpdf, '-')
@@ -120,7 +120,7 @@ plt.xticks(rotation=45)
 plt.tight_layout(); plt.show()
                                     
 # Single Plot
-tmpetf = 'IWM'
+tmpetf = name
 tmptkr = ('Close', tmpetf)
 t1y_date = todays_date - pd.tseries.offsets.DateOffset(years=1)
 fig, ax = plt.subplots()
@@ -197,7 +197,7 @@ print(f'\nTop Performers\n {res.loc[names_top].T}')
 dicSgnls = StratMgr.get_signals_data()
 
 # Base data for strat
-name = 'EFA'
+name = 'SBUX' # XOM
 df_signals = dicSgnls[name]
 df_pxi = StratMgr.get_PricePlusIndicators_data(name)
 # Valid entries
@@ -277,7 +277,7 @@ N_sim = 1000
 N_sample = bt_ret.shape[0]
 dic_bal = {}
 init_capital = 100 
-pos_size_pct = 0.002
+pos_size_pct = 0.005
 for n in range(N_sim):
     sim_r = empirical_sample(recdf,N_sample)
     pnl = np.array([])
