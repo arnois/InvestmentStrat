@@ -63,7 +63,7 @@ TrendMgr.set_trend_data(data,'Close')
 data_trend = TrendMgr.get_trend_data()
 
 # Check any assets TA
-name = 'SBUX' # IWM
+name = 'IWM' # SBUX
 namecol = [f'{name}_trend',f'{name}_trend_strength',
            f'{name}_trend_status',f'{name}_ema_d']
 
@@ -106,7 +106,7 @@ todays_date = pd.Timestamp.today().date()
 
 ## Plotting Price Levels
 fig, ax = plt.subplots()
-tmpetf = ['WMT','XOM','DIS','SBUX'] # ['GLD','COPX','URA','IWM']
+tmpetf = ['GLD','COPX','URA','IWM'] # ['WMT','XOM','DIS','SBUX']
 tmptkrs = [('Close', s) for s in tmpetf]
 tmpdf = data.loc['2024':,tmptkrs].dropna()/data.loc['2024':,tmptkrs].dropna().iloc[0]*100
 ax.plot(tmpdf, '-')
@@ -197,7 +197,7 @@ print(f'\nTop Performers\n {res.loc[names_top].T}')
 dicSgnls = StratMgr.get_signals_data()
 
 # Base data for strat
-name = 'SBUX' # XOM
+name = 'EEM' # 'SBUX'
 df_signals = dicSgnls[name]
 df_pxi = StratMgr.get_PricePlusIndicators_data(name)
 # Valid entries
