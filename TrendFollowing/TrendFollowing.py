@@ -74,18 +74,18 @@ tmpTD = data_trend[namecol].iloc[-21:].merge(
 print(f'\n{name} Trend Dynamics:\n{tmpTD}')
     
 #%% TREND ANALYSIS
-
+last4Mo = np.arange(-1,-28*4,-27).tolist()
 # TrendStrength-based weigths
 data_strength_Z = TrendMgr.get_trend_strength_Z()
 data_w = data_strength_Z.apply(lambda x: x/x.sum(), axis=1)
 data_w.columns = [s.replace('_ema_d','') for s in data_w.columns]
-print(f"Last W's:\n{round(100*data_w.iloc[-5:].T,0)}\n")
+print(f"Last W's:\n{round(100*data_w.iloc[last4Mo].T,0)}\n")
 
 # Long-only subcase
 data_w_lOnly = (((data_strength_Z.apply(np.sign)+1)/2).\
     fillna(0)*data_strength_Z).apply(lambda x: x/x.sum(), axis=1)
 data_w_lOnly.columns = [s.replace('_ema_d','') for s in data_w_lOnly.columns]
-print(f"Last Long-Only W's:\n{round(100*data_w_lOnly.iloc[-5:].T,0)}\n")
+print(f"Last Long-Only W's:\n{round(100*data_w_lOnly.iloc[last4Mo].T,0)}\n")
 
 # Filter out non-weak trends
 nonwTrends = []
