@@ -55,7 +55,7 @@ except FileNotFoundError:
 
 # Asset names
 names = np.array([s for s in data.columns.levels[1] if s != ''])
-
+#exit()
 #%% TREND
 nes, nel = 21, 64
 TrendMgr = TrendMan(nes, nel)
@@ -101,12 +101,13 @@ for name in names:
 print(f"\nNon-Weak Trends\n{data_trend.iloc[-1][[f'{c}_trend' for c in nonwTrends]]}")
 
 #%% PRICE & TREND VIZ
+es_tkrs = ['XLB', 'XLC', 'XLE', 'XLF', 'XLI', 'XLK', 'XLP', 'XLRE', 'XLU', 'XLV', 'XLY']
 # Todays date
 todays_date = pd.Timestamp.today().date() 
 
 ## Plotting Price Levels
-fig, ax = plt.subplots()
 tmpetf = ['GLD','COPX','URA','IWM'] # ['WMT','XOM','DIS','SBUX']
+fig, ax = plt.subplots()
 tmptkrs = [('Close', s) for s in tmpetf]
 tmpdf = data.loc['2024':,tmptkrs].dropna()/data.loc['2024':,tmptkrs].dropna().iloc[0]*100
 ax.plot(tmpdf, '-')
@@ -114,7 +115,7 @@ myFmt = mdates.DateFormatter('%d%b')
 ax.xaxis.set_major_formatter(myFmt)
 ax.set_xlabel('')
 ax.set_ylabel('Index')
-ax.set_title('ETFs')
+ax.set_title('Asset Cumulative Returns')
 ax.legend(tmpetf, loc='best', bbox_to_anchor=(1.01,1.01))
 plt.xticks(rotation=45)
 plt.tight_layout(); plt.show()
@@ -131,7 +132,7 @@ myFmt = mdates.DateFormatter('%d%b%Y')
 ax.xaxis.set_major_formatter(myFmt)
 ax.set_xlabel('')
 ax.set_ylabel('Price')
-ax.set_title(f'{tmpetf} ETF')
+ax.set_title(f'{tmpetf}')
 ax.legend(['Price','Short EMA', 'Long EMA'], 
           loc='best', bbox_to_anchor=(1.01,1.01))
 plt.xticks(rotation=45)
