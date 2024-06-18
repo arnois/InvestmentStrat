@@ -25,8 +25,8 @@ from DataMan import DataMan
 from TrendMan import TrendMan
 #%% DATA
 # Path
-path = r'H:\db\etf_bbg.parquet'
-if not os.path.exists(path):    path = cwdp_parent+r'\etf_bbg.parquet' # eqty
+path = r'H:\db\fut_bbg.parquet'
+if not os.path.exists(path):    path = cwdp_parent+r'\fut_bbg.parquet' # etf, eqty, fut
 
 # Data Manager
 dfMgr = DataMan(datapath=path)
@@ -36,9 +36,10 @@ dfMgr.set_data_from_path()
 data = dfMgr.get_data()
 
 # Data subset
-data_slice = dfMgr.sliceDataFrame(dt_start='2016-12-31', 
-                     dt_end='2020-12-31', 
-                     lst_securities=['TLT','GLD','IWM','URA','USO'])
+selSec = ['CORN','COPPER','R10Y','MXN','SP500'] # ['TLT','GLD','IWM','URA','USO'], ['CORN','COPPER','R10Y','MXN','SP500']
+data_slice = dfMgr.sliceDataFrame(dt_start='2022-12-31', 
+                     dt_end='2024-03-31', 
+                     lst_securities=selSec)
 # Data stats
 print(dfMgr.statistics(data_slice.apply(np.log).diff().dropna()['Close']).T)
 
@@ -47,7 +48,7 @@ dfMgr.plot_corrmatrix(data_slice['Close'].diff(), txtCorr=True)
 
 # Data update
 try:
-    xlpath_update = r'C:\Users\jquintero\db\datapull_etf_1D.xlsx' # eqty
+    xlpath_update = r'C:\Users\jquintero\db\datapull_fut_1D.xlsx' # etf, eqty, fut
     dfMgr.update_data(xlpath = xlpath_update)
     data = dfMgr.get_data()
 except FileNotFoundError:
@@ -63,7 +64,7 @@ TrendMgr.set_trend_data(data,'Close')
 data_trend = TrendMgr.get_trend_data()
 
 # Check any assets TA
-name = 'IWM' # SBUX
+name = 'R10Y' # SBUX, R10Y, IWM
 namecol = [f'{name}_trend',f'{name}_trend_strength',
            f'{name}_trend_status',f'{name}_ema_d']
 
@@ -85,7 +86,8 @@ print(f"Last W's:\n{round(100*data_w.iloc[last4Mo].T,0)}\n")
 data_w_lOnly = (((data_strength_Z.apply(np.sign)+1)/2).\
     fillna(0)*data_strength_Z).apply(lambda x: x/x.sum(), axis=1)
 data_w_lOnly.columns = [s.replace('_ema_d','') for s in data_w_lOnly.columns]
-print(f"Last Long-Only W's:\n{round(100*data_w_lOnly.iloc[last4Mo].T,0)}\n")
+tmpLOP = round(100*data_w_lOnly.iloc[last4Mo].T,0)
+print(f"Last Long-Only W's:\n{tmpLOP.loc[~(tmpLOP == 0).all(axis=1),]}\n")
 
 # Filter out non-weak trends
 nonwTrends = []
@@ -102,12 +104,13 @@ print(f"\nNon-Weak Trends\n{data_trend.iloc[-1][[f'{c}_trend' for c in nonwTrend
 
 #%% PRICE & TREND VIZ
 es_tkrs = ['XLB', 'XLC', 'XLE', 'XLF', 'XLI', 'XLK', 'XLP', 'XLRE', 'XLU', 'XLV', 'XLY']
+
 # Todays date
 todays_date = pd.Timestamp.today().date() 
 
 ## Plotting Price Levels
-tmpetf = ['GLD','COPX','URA','IWM'] # ['WMT','XOM','DIS','SBUX']
-fig, ax = plt.subplots()
+tmpetf = ['CORN','COPPER','R10Y','MXN','SP500'] # ['WMT','XOM','DIS','SBUX'], ['GLD','COPX','URA','IWM'], ['CORN','COPPER','R10Y','MXN','SP500']
+fig, ax = plt.subplots(figsize=(9,7))
 tmptkrs = [('Close', s) for s in tmpetf]
 tmpdf = data.loc['2024':,tmptkrs].dropna()/data.loc['2024':,tmptkrs].dropna().iloc[0]*100
 ax.plot(tmpdf, '-')
@@ -124,7 +127,7 @@ plt.tight_layout(); plt.show()
 tmpetf = name
 tmptkr = ('Close', tmpetf)
 t1y_date = todays_date - pd.tseries.offsets.DateOffset(years=1)
-fig, ax = plt.subplots()
+fig, ax = plt.subplots(figsize=(9,7))
 ax.plot(data.loc[t1y_date:,tmptkr].dropna(),c='darkcyan')
 ax.plot(data_trend.loc[t1y_date:,tmpetf+'_EMA_ST'],'--', c='C0')
 ax.plot(data_trend.loc[t1y_date:,tmpetf+'_EMA_LT'],'--',c='orange')
@@ -133,7 +136,7 @@ ax.xaxis.set_major_formatter(myFmt)
 ax.set_xlabel('')
 ax.set_ylabel('Price')
 ax.set_title(f'{tmpetf}')
-ax.legend(['Price','Short EMA', 'Long EMA'], 
+ax.legend(['Price','Fast EMA', 'Slow EMA'], 
           loc='best', bbox_to_anchor=(1.01,1.01))
 plt.xticks(rotation=45)
 plt.tight_layout(); plt.show()
@@ -184,9 +187,15 @@ for name in names:
                  axis=1)
 
 df_RetIdx = cumRet.ffill().fillna(1)*100
-df_RetIdx[df_RetIdx.columns[df_RetIdx.iloc[-1] >= 100]].drop('BTC', axis=1).\
-    plot(title='BT Cumulative Returns').\
-        legend(loc='center left', bbox_to_anchor=(1.0, 0.5)); plt.show()
+if 'BTC' in df_RetIdx:
+    df_RetIdx[df_RetIdx.columns[df_RetIdx.iloc[-1] >= 100]].drop('BTC', axis=1).\
+        plot(title='BT Cumulative Returns', figsize=(12,10)).\
+            legend(loc='center left', bbox_to_anchor=(1.0, 0.5)); plt.show()
+else:
+    df_RetIdx[df_RetIdx.columns[df_RetIdx.iloc[-1] >= 100]].\
+        plot(title='BT Cumulative Returns', figsize=(12,10)).\
+            legend(loc='center left', bbox_to_anchor=(1.0, 0.5)); plt.show()
+
 
 # Top performers
 names_top = res['TRet'].sort_values(ascending=False)[:5].index.\
@@ -198,7 +207,7 @@ print(f'\nTop Performers\n {res.loc[names_top].T}')
 dicSgnls = StratMgr.get_signals_data()
 
 # Base data for strat
-name = 'EEM' # 'SBUX'
+name = 'R10Y' # 'SBUX', 'EEM', 'R10Y'
 df_signals = dicSgnls[name]
 df_pxi = StratMgr.get_PricePlusIndicators_data(name)
 # Valid entries
