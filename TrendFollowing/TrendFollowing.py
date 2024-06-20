@@ -36,7 +36,7 @@ dfMgr.set_data_from_path()
 data = dfMgr.get_data()
 
 # Data subset
-selSec = ['CORN','COPPER','R10Y','MXN','SP500'] # ['TLT','GLD','IWM','URA','USO'], ['CORN','COPPER','R10Y','MXN','SP500']
+selSec = ['SOYBEAN','COPPER','R10Y','MXN','SP500'] # ['TLT','GLD','IWM','URA','USO'], ['CORN','COPPER','R10Y','MXN','SP500']
 data_slice = dfMgr.sliceDataFrame(dt_start='2022-12-31', 
                      dt_end='2024-03-31', 
                      lst_securities=selSec)
@@ -56,7 +56,7 @@ except FileNotFoundError:
 
 # Asset names
 names = np.array([s for s in data.columns.levels[1] if s != ''])
-#exit()
+exit()
 #%% TREND
 nes, nel = 21, 64
 TrendMgr = TrendMan(nes, nel)
