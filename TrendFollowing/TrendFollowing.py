@@ -64,7 +64,7 @@ TrendMgr.set_trend_data(data,'Close')
 data_trend = TrendMgr.get_trend_data()
 
 # Check any assets TA
-name = 'R10Y' # SBUX, R10Y, IWM
+name = 'R10Y' # SBUX, R10Y, IWM, RUSSELL
 namecol = [f'{name}_trend',f'{name}_trend_strength',
            f'{name}_trend_status',f'{name}_ema_d']
 
@@ -109,7 +109,7 @@ es_tkrs = ['XLB', 'XLC', 'XLE', 'XLF', 'XLI', 'XLK', 'XLP', 'XLRE', 'XLU', 'XLV'
 todays_date = pd.Timestamp.today().date() 
 
 ## Plotting Price Levels
-tmpetf = ['CORN','COPPER','R10Y','MXN','SP500'] # ['WMT','XOM','DIS','SBUX'], ['GLD','COPX','URA','IWM'], ['CORN','COPPER','R10Y','MXN','SP500']
+tmpetf = ['CORN','COPPER','R10Y','MXN','RUSSELL'] # ['WMT','XOM','DIS','SBUX'], ['GLD','COPX','URA','IWM'], ['CORN','COPPER','R10Y','MXN','SP500']
 fig, ax = plt.subplots(figsize=(9,7))
 tmptkrs = [('Close', s) for s in tmpetf]
 tmpdf = data.loc['2024':,tmptkrs].dropna()/data.loc['2024':,tmptkrs].dropna().iloc[0]*100
@@ -124,10 +124,10 @@ plt.xticks(rotation=45)
 plt.tight_layout(); plt.show()
                                     
 # Single Plot
-tmpetf = name
+tmpetf = tmpetf[-1]
 tmptkr = ('Close', tmpetf)
 t1y_date = todays_date - pd.tseries.offsets.DateOffset(years=1)
-fig, ax = plt.subplots(figsize=(9,7))
+fig, ax = plt.subplots(figsize=(13,7))
 ax.plot(data.loc[t1y_date:,tmptkr].dropna(),c='darkcyan')
 ax.plot(data_trend.loc[t1y_date:,tmpetf+'_EMA_ST'],'--', c='C0')
 ax.plot(data_trend.loc[t1y_date:,tmpetf+'_EMA_LT'],'--',c='orange')
