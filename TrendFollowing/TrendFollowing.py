@@ -24,9 +24,10 @@ else:
 from DataMan import DataMan
 from TrendMan import TrendMan
 #%% DATA
+aclss = 'eqty' # etf, eqty, fut
 # Path
-path = r'H:\db\fut_bbg.parquet'
-if not os.path.exists(path):    path = cwdp_parent+r'\fut_bbg.parquet' # etf, eqty, fut
+path = rf'H:\db\{aclss}_bbg.parquet'
+if not os.path.exists(path):    path = cwdp_parent+rf'\{aclss}_bbg.parquet' 
 
 # Data Manager
 dfMgr = DataMan(datapath=path)
@@ -36,10 +37,13 @@ dfMgr.set_data_from_path()
 data = dfMgr.get_data()
 
 # Data subset
-selSec = ['SOYBEAN','COPPER','R10Y','MXN','SP500'] # ['TLT','GLD','IWM','URA','USO'], ['CORN','COPPER','R10Y','MXN','SP500']
+## ['TLT','GLD','IWM','URA','USO']
+## ['CORN','COPPER','R10Y','MXN','SP500']
+## ['SBUX','PLUG','WMT','MSFT']
+selSec = ['SBUX','PLUG','WMT','MSFT'] 
 data_slice = dfMgr.sliceDataFrame(dt_start='2022-12-31', 
-                     dt_end='2024-03-31', 
-                     lst_securities=selSec)
+                                  dt_end='2024-03-31', 
+                                  lst_securities=selSec)
 # Data stats
 print(dfMgr.statistics(data_slice.apply(np.log).diff().dropna()['Close']).T)
 
@@ -48,7 +52,7 @@ dfMgr.plot_corrmatrix(data_slice['Close'].diff(), txtCorr=True)
 
 # Data update
 try:
-    xlpath_update = r'C:\Users\jquintero\db\datapull_fut_1D.xlsx' # etf, eqty, fut
+    xlpath_update = rf'C:\Users\jquintero\db\datapull_{aclss}_1D.xlsx'
     dfMgr.update_data(xlpath = xlpath_update)
     data = dfMgr.get_data()
 except FileNotFoundError:
@@ -64,7 +68,7 @@ TrendMgr.set_trend_data(data,'Close')
 data_trend = TrendMgr.get_trend_data()
 
 # Check any assets TA
-name = 'R10Y' # SBUX, R10Y, IWM, RUSSELL
+name = 'WMT' # SBUX, R10Y, IWM, RUSSELL
 namecol = [f'{name}_trend',f'{name}_trend_strength',
            f'{name}_trend_status',f'{name}_ema_d']
 
@@ -141,7 +145,7 @@ ax.legend(['Price','Fast EMA', 'Slow EMA'],
 plt.xticks(rotation=45)
 plt.tight_layout(); plt.show()
 ##
-print(pd.concat([data[tmptkr],data_trend[tmpetf+'_EMA_ST']],axis=1).iloc[-21:])
+print(pd.concat([data[tmptkr],data_trend[[tmpetf+'_EMA_ST',tmpetf+'_EMA_LT']]],axis=1).iloc[-21:])
 #%% STRAT: Trend filter + price xover signal /PRICE
 # Trend is determined by the relative position of the short over the long EMA
 # Signal is defined by price xover over the short EMA
