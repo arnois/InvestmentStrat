@@ -24,7 +24,7 @@ else:
 from DataMan import DataMan
 from TrendMan import TrendMan
 #%% DATA
-aclss = 'eqty' # etf, eqty, fut
+aclss = 'fut' # etf, eqty, fut
 # Path
 path = rf'H:\db\{aclss}_bbg.parquet'
 if not os.path.exists(path):    path = cwdp_parent+rf'\{aclss}_bbg.parquet' 
@@ -40,7 +40,7 @@ data = dfMgr.get_data()
 ## ['TLT','GLD','IWM','URA','USO']
 ## ['CORN','COPPER','R10Y','MXN','SP500']
 ## ['SBUX','PLUG','WMT','MSFT']
-selSec = ['SBUX','PLUG','WMT','MSFT'] 
+selSec = ['CORN','COPPER','R10Y','MXN','SP500']
 data_slice = dfMgr.sliceDataFrame(dt_start='2022-12-31', 
                                   dt_end='2024-03-31', 
                                   lst_securities=selSec)
@@ -68,7 +68,7 @@ TrendMgr.set_trend_data(data,'Close')
 data_trend = TrendMgr.get_trend_data()
 
 # Check any assets TA
-name = 'WMT' # SBUX, R10Y, IWM, RUSSELL
+name = 'RUSSELL' # SBUX, R10Y, IWM, RUSSELL
 namecol = [f'{name}_trend',f'{name}_trend_strength',
            f'{name}_trend_status',f'{name}_ema_d']
 
