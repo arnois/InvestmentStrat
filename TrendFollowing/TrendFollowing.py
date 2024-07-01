@@ -68,7 +68,7 @@ TrendMgr.set_trend_data(data,'Close')
 data_trend = TrendMgr.get_trend_data()
 
 # Check any assets TA
-name = 'RUSSELL' # SBUX, R10Y, IWM, RUSSELL
+name = 'R10Y' # SBUX, R10Y, IWM, RUSSELL
 namecol = [f'{name}_trend',f'{name}_trend_strength',
            f'{name}_trend_status',f'{name}_ema_d']
 
